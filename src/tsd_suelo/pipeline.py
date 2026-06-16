@@ -9,7 +9,7 @@ from .atlas import write_atlas_products
 from .config import PipelineConfig
 from .etl import build_geo_targets, build_inventory, build_waveform_targets
 from .faults import build_fault_candidates, fault_candidate_features, write_fault_products
-from .forward import write_forward_template
+from .forward import write_forward_products
 from .graph import build_kozyrev_fields, build_route_graph, write_graph_products
 from .latent import discover_latent_modes, write_latent_products
 from .logging_utils import PhaseTimer, RunLogger, format_seconds
@@ -242,8 +242,30 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 extra_features=fault_candidate_features(fault_candidates.head(200)),
             )
 
-        with PhaseTimer(log, "Contrato de forward condicionado posterior"):
-            write_forward_template(geo_targets, modes, cfg.output_dir)
+        with PhaseTimer(log, "F11 dinamica compatible para forward condicionado"):
+            forward_paths = [
+                cfg.output_dir / "compatible_dynamics.parquet",
+                cfg.output_dir / "forward_conditioning_profiles.parquet",
+                cfg.output_dir / "forward_conditioning_template.json",
+            ]
+            if cfg.reuse_products and _all_exist(forward_paths):
+                _log(log, "Reusando compatible_dynamics/forward_conditioning_profiles existentes")
+                compatible_dynamics = _read_parquet(forward_paths[0])
+                forward_profiles = _read_parquet(forward_paths[1])
+            else:
+                compatible_dynamics, forward_profiles = write_forward_products(
+                    geo_targets,
+                    residuals,
+                    modes,
+                    kozyrev_fields,
+                    fault_candidates,
+                    cfg.output_dir,
+                )
+            _log(
+                log,
+                f"Compatible dynamics filas={compatible_dynamics.shape[0]} "
+                f"profiles={forward_profiles.shape[0]}",
+            )
 
         with PhaseTimer(log, "Reporte de resultados"):
             build_results_report(cfg.output_dir, mask_geojson=cfg.mask_geojson)
@@ -264,6 +286,8 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "route_graph_observed": int(route_graph.shape[0]),
                 "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
                 "fault_candidates": int(fault_candidates.shape[0]),
+                "compatible_dynamics": int(compatible_dynamics.shape[0]),
+                "forward_conditioning_profiles": int(forward_profiles.shape[0]),
             },
             "products": [
                 "run.log",
@@ -285,6 +309,8 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "top_fault_candidates.csv",
                 "fault_candidates.geojson",
                 "fault_candidates.kmz",
+                "compatible_dynamics.parquet",
+                "forward_conditioning_profiles.parquet",
                 "atlas_geologico.geojson",
                 "atlas_geologico.kmz",
                 "chile_mask.geojson",

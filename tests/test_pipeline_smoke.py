@@ -96,6 +96,8 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert (out / "latent_modes.parquet").exists()
     assert (out / "fault_candidates.parquet").exists()
     assert (out / "fault_candidates.geojson").exists()
+    assert (out / "compatible_dynamics.parquet").exists()
+    assert (out / "forward_conditioning_profiles.parquet").exists()
     assert (out / "atlas_geologico.geojson").exists()
     geo = pd.read_parquet(out / "geo_targets_observed.parquet")
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
@@ -103,6 +105,10 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert (out / "results_report.html").exists()
     faults = pd.read_parquet(out / "fault_candidates.parquet")
     assert {"candidate_id", "fault_candidate_score", "strike_deg"}.issubset(faults.columns)
+    compatible = pd.read_parquet(out / "compatible_dynamics.parquet")
+    assert {"dynamic_anomaly_score", "forward_support_weight", "compatible_dynamics_status"}.issubset(compatible.columns)
+    profiles = pd.read_parquet(out / "forward_conditioning_profiles.parquet")
+    assert {"context_type", "context_id", "n_records"}.issubset(profiles.columns)
     assert (out / "waveform_targets_errors.csv").exists()
     meta = pd.read_json(out / "waveform_targets_observed.meta.json", typ="series")
     assert int(meta["h5_errors"]) == 1
@@ -119,3 +125,4 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert reused["rows"]["geo_targets_observed"] == manifest["rows"]["geo_targets_observed"]
     assert reused["rows"]["geo_residuals"] == manifest["rows"]["geo_residuals"]
     assert reused["rows"]["fault_candidates"] == manifest["rows"]["fault_candidates"]
+    assert reused["rows"]["compatible_dynamics"] == manifest["rows"]["compatible_dynamics"]

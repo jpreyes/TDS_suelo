@@ -186,6 +186,8 @@ fault_candidates.parquet
 top_fault_candidates.csv
 fault_candidates.geojson
 fault_candidates.kmz
+compatible_dynamics.parquet
+forward_conditioning_profiles.parquet
 atlas_geologico.geojson
 atlas_geologico.kmz
 chile_mask.geojson
@@ -218,6 +220,35 @@ fault_candidates.kmz
 ```
 
 `fault_candidate_score` prioriza rutas donde coinciden modos residuales altos, saltos Kozyrev, PGA/Arias y repeticion de registros. Abre `fault_candidates.geojson` o `fault_candidates.kmz` en QGIS/Google Earth y cruza esos lineamientos con cartografia de fallas oficial si necesitas nombres geologicos.
+
+## Dinamica Compatible Para Forward
+
+El build genera una capa condicionante para forward posterior:
+
+```text
+compatible_dynamics.parquet
+forward_conditioning_profiles.parquet
+forward_conditioning_template.json
+```
+
+`compatible_dynamics.parquet` tiene una fila por registro observado con geometria, sitio conocido, modos latentes, campos Kozyrev, falla candidata asociada, targets observados, baseline por fuente/distancia/sitio y correcciones dinamicas:
+
+```text
+baseline_known_site_log_<target>
+dynamic_correction_log_<target>
+compatible_log_<target>
+compatible_<target>
+dynamic_anomaly_score
+forward_support_weight
+```
+
+La forma operativa para un forward condicionado es:
+
+```text
+log(target_forward) = baseline_source_distance_site_log + dynamic_correction_log(context)
+```
+
+`forward_conditioning_profiles.parquet` agrega esas correcciones por contexto `source3d`, `route`, `receiver` y `fault_candidate`, para reutilizarlas sobre geometria nueva o escenarios cercanos. Antes de usarlo como predictor, valida fuera de muestra.
 
 ## Flujo Implementado
 

@@ -29,6 +29,7 @@ Las rutas de datos son argumentos de CLI y pueden estar fuera del repo.
 | F09 | Kozyrev/grafo | `kozyrev_graph_fields.parquet` |
 | F09b | Fallas candidatas observadas | `fault_candidates.parquet`, `fault_candidates.geojson` |
 | F10 | Atlas | `atlas_geologico.geojson`, `atlas_geologico.kmz` |
+| F11 | Dinamica compatible para forward | `compatible_dynamics.parquet`, `forward_conditioning_profiles.parquet` |
 | F11 | Reporte operativo | `results_report.html`, `top_*_anomalies.csv` |
 
 ## Residualizacion

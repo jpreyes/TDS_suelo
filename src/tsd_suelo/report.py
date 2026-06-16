@@ -28,6 +28,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     kozyrev = _read_optional_parquet(output_dir / "kozyrev_graph_fields.parquet")
     route_graph = _read_optional_parquet(output_dir / "route_graph_observed.parquet")
     faults = _read_optional_parquet(output_dir / "fault_candidates.parquet")
+    compatible = _read_optional_parquet(output_dir / "compatible_dynamics.parquet")
+    profiles = _read_optional_parquet(output_dir / "forward_conditioning_profiles.parquet")
     attribution = _read_optional_csv(output_dir / "target_level_attribution.csv")
     mask = load_chile_mask(mask_geojson if mask_geojson else _maybe_existing_mask(output_dir))
 
@@ -52,6 +54,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         "route_edges": int(route_graph.shape[0]),
         "kozyrev_nodes": int(kozyrev.shape[0]),
         "fault_candidates": int(faults.shape[0]),
+        "compatible_dynamics": int(compatible.shape[0]),
+        "forward_profiles": int(profiles.shape[0]),
         "mask_name": mask.name,
         "receiver_in_chile_mask": int(geo.get("receiver_in_chile_mask", pd.Series(dtype=bool)).fillna(False).sum()),
         "route_in_chile_mask": int(geo.get("route_in_chile_mask", pd.Series(dtype=bool)).fillna(False).sum()),
@@ -262,6 +266,8 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         "route_edges": "Aristas ruta",
         "kozyrev_nodes": "Nodos Kozyrev",
         "fault_candidates": "Candidatos falla",
+        "compatible_dynamics": "Dinamica compatible",
+        "forward_profiles": "Perfiles forward",
         "receiver_in_chile_mask": "Receptores en mascara",
     }
     cards = []

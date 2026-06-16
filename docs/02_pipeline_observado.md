@@ -147,6 +147,44 @@ fault_candidates.kmz
 
 Cada candidato representa un corredor fuente-ruta-receptor con concentracion de modos residuales, salto Kozyrev y repeticion de registros. Para interpretacion geologica final, cruzar esta capa con trazas oficiales de fallas y mapas geologicos en QGIS.
 
+## Dinamica Compatible Forward-Ready
+
+El producto forward-ready se escribe en:
+
+```text
+compatible_dynamics.parquet
+forward_conditioning_profiles.parquet
+forward_conditioning_template.json
+```
+
+`compatible_dynamics.parquet` conserva la dinamica observada por registro:
+
+```text
+baseline_known_site_log_<target>
+dynamic_correction_log_<target>
+compatible_log_<target>
+compatible_<target>
+dynamic_anomaly_score
+forward_support_weight
+```
+
+`forward_conditioning_profiles.parquet` resume correcciones por contexto multiescala:
+
+```text
+source3d
+route
+receiver
+fault_candidate
+```
+
+La ecuacion minima para un forward posterior queda:
+
+```text
+log(target_forward) = baseline_source_distance_site_log + dynamic_correction_log(context)
+```
+
+La tabla no genera sismogramas sinteticos. Es el condicionamiento observado que debe alimentar un forward posterior validado fuera de muestra.
+
 Para ver por SSH:
 
 ```bash
