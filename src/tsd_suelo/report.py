@@ -68,6 +68,7 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     }
 
     html_text = _render_html(
+        output_dir=output_dir,
         summary=summary,
         attribution=attribution.head(top_n),
         kozyrev_top=kozyrev_top,
@@ -259,6 +260,7 @@ def _top_ultrametric_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
 
 
 def _render_html(
+    output_dir: Path,
     summary: dict[str, Any],
     attribution: pd.DataFrame,
     kozyrev_top: pd.DataFrame,
@@ -294,6 +296,8 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 <h1>TSD-Suelo Results</h1>
 <p class="note">Mascara: {html.escape(str(summary.get("mask_name", "")))}. Reporte autonomo generado desde parquets locales.</p>
 {_summary_grid(summary)}
+<h2>Descargas</h2>
+{_download_links(output_dir)}
 <h2>Mapa De Calor Kozyrev</h2>
 <p class="note">Color por probabilidad empirica observada compatible. Azul bajo, amarillo medio, rojo alto. Los GeoJSON/parquets contienen todos los nodos y aristas.</p>
 {_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
@@ -342,6 +346,35 @@ def _table_html(df: pd.DataFrame) -> str:
     if df.empty:
         return "<p class='note'>Sin datos.</p>"
     return df.to_html(index=False, escape=True, float_format=lambda x: f"{x:.4g}")
+
+
+def _download_links(output_dir: Path) -> str:
+    products = [
+        ("Reporte HTML", "results_report.html"),
+        ("Resumen JSON", "results_summary.json"),
+        ("Mapa calor Kozyrev GeoJSON", "kozyrev_heatmap.geojson"),
+        ("Mapa calor Kozyrev KMZ", "kozyrev_heatmap.kmz"),
+        ("Nodos ultrametricos GeoJSON", "kozyrev_ultrametric_nodes.geojson"),
+        ("Aristas ultrametricas GeoJSON", "kozyrev_ultrametric_edges.geojson"),
+        ("Fallas candidatas GeoJSON", "fault_candidates.geojson"),
+        ("Fallas candidatas KMZ", "fault_candidates.kmz"),
+        ("Atlas geologico GeoJSON", "atlas_geologico.geojson"),
+        ("Atlas geologico KMZ", "atlas_geologico.kmz"),
+        ("Top fallas candidatas CSV", "top_fault_candidates.csv"),
+        ("Top Kozyrev CSV", "top_kozyrev_anomalies.csv"),
+        ("Dinamica compatible parquet", "compatible_dynamics.parquet"),
+        ("Perfiles forward parquet", "forward_conditioning_profiles.parquet"),
+        ("Nodos ultrametricos parquet", "kozyrev_ultrametric_nodes.parquet"),
+        ("Aristas ultrametricas parquet", "kozyrev_ultrametric_edges.parquet"),
+        ("Log build", "run.log"),
+    ]
+    links = []
+    for label, filename in products:
+        if (output_dir / filename).exists():
+            links.append(f"<li><a href='{html.escape(filename)}' download>{html.escape(label)}</a></li>")
+    if not links:
+        return "<p class='note'>Sin archivos de descarga todavia.</p>"
+    return "<ul>" + "".join(links) + "</ul>"
 
 
 def _svg_map(geo_modes: pd.DataFrame, receiver_top: pd.DataFrame, mask: GeoMask) -> str:

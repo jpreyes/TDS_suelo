@@ -303,14 +303,27 @@ tsd-suelo summary --output-dir outputs_precomputed --top-n 20
 Reporte HTML:
 
 ```bash
-python -m http.server 8787 --bind 127.0.0.1 -d outputs_precomputed
+tsd-suelo serve \
+  --output-dir outputs_precomputed \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --host 127.0.0.1 \
+  --port 8787
 ```
 
-Desde tu maquina local:
+Para habilitar ejecucion desde la pagina admin:
 
 ```bash
-ssh -L 8000:localhost:8000 usuario@servidor
+export TSD_SUELO_ADMIN_TOKEN='cambia-este-token-largo'
+tsd-suelo serve \
+  --output-dir outputs_precomputed \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --host 127.0.0.1 \
+  --port 8787
 ```
+
+Luego abre `https://tsd.jpreyes.cl/admin`. Desde esa pagina puedes lanzar `build`, `git pull --ff-only`, `pip install -e .`, detener un proceso, ver logs y descargar productos. Usa esto solo con token fuerte y preferentemente detras de Cloudflare Access.
 
 Abre `http://localhost:8000/results_report.html`.
 

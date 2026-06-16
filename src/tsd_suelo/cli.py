@@ -15,13 +15,13 @@ def _base_parser() -> argparse.ArgumentParser:
         description="Pipeline TSD-Suelo observado desde H5 y flatfiles primarios.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for name in ("inventory", "targets", "build", "report", "summary"):
+    for name in ("inventory", "targets", "build", "report", "summary", "serve"):
         cmd = subparsers.add_parser(name)
         cmd.add_argument("--records-dir", type=Path, default=DEFAULT_RECORDS_DIR)
         cmd.add_argument("--flatfiles-dir", type=Path, default=DEFAULT_FLATFILES_DIR)
         cmd.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
         cmd.add_argument("--max-h5", type=int, default=None, help="Limita cantidad de H5 para pruebas rapidas.")
-        cmd.add_argument("--damping", type=float, default=0.05, help="Amortiguamiento PSA, por defecto 5%.")
+        cmd.add_argument("--damping", type=float, default=0.05, help="Amortiguamiento PSA, por defecto 5%%.")
         cmd.add_argument("--h5-only", action="store_true", help="No agrega registros flatfile-only al geo_targets.")
         cmd.add_argument("--no-chile-mask", action="store_true", help="No aplica la mascara de Chile.")
         cmd.add_argument("--mask-geojson", type=Path, default=None, help="GeoJSON local de mascara de Chile o region de estudio.")
@@ -33,6 +33,11 @@ def _base_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--log-file", type=Path, default=None, help="Archivo de log. Por defecto outputs/run.log.")
         cmd.add_argument("--progress-every", type=int, default=500, help="Reporta progreso H5 cada N archivos.")
         cmd.add_argument("--quiet", action="store_true", help="Escribe log sin imprimir progreso en pantalla.")
+        if name == "serve":
+            cmd.add_argument("--host", default="127.0.0.1", help="Host HTTP, por defecto 127.0.0.1.")
+            cmd.add_argument("--port", type=int, default=8787, help="Puerto HTTP, por defecto 8787.")
+            cmd.add_argument("--repo-dir", type=Path, default=Path("."), help="Directorio del repo para git pull/install.")
+            cmd.add_argument("--admin-token", default=None, help="Token para controles admin. Alternativa: TSD_SUELO_ADMIN_TOKEN.")
     return parser
 
 
@@ -85,6 +90,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "summary":
         print(print_summary(cfg.output_dir.expanduser().resolve(), top_n=args.top_n))
         return 0
+    if args.command == "serve":
+        from .server import serve
+
+        return serve(
+            cfg,
+            host=args.host,
+            port=args.port,
+            repo_dir=args.repo_dir,
+            admin_token=args.admin_token,
+        )
     parser.error(f"Comando no soportado: {args.command}")
     return 2
 
