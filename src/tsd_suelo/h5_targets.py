@@ -246,9 +246,34 @@ def _parse_filename(path: Path) -> tuple[str, str]:
     return event_id, station_id
 
 
+def _read_h5_error(path: Path, error: BaseException) -> dict[str, Any]:
+    event_from_name, station_from_name = _parse_filename(path)
+    return {
+        "h5_file": str(path),
+        "h5_name": path.name,
+        "record_observed_id": f"{event_from_name}_{station_from_name}",
+        "event_id": event_from_name,
+        "station_id": station_from_name,
+        "filename_event_id": event_from_name,
+        "filename_station_id": station_from_name,
+        "read_ok": False,
+        "read_error": f"{type(error).__name__}: {error}",
+    }
+
+
+def _safe_read_h5_observation(path: Path, damping: float = 0.05, compute_psa: bool = True) -> dict[str, Any]:
+    try:
+        row = _read_h5_observation(path, damping=damping, compute_psa=compute_psa)
+        row["read_ok"] = True
+        row["read_error"] = None
+        return row
+    except Exception as exc:
+        return _read_h5_error(path, exc)
+
+
 def _read_h5_worker(args: tuple[str, float, bool]) -> dict[str, Any]:
     path, damping, compute_psa = args
-    return _read_h5_observation(Path(path), damping=damping, compute_psa=compute_psa)
+    return _safe_read_h5_observation(Path(path), damping=damping, compute_psa=compute_psa)
 
 
 def build_h5_targets(
@@ -285,7 +310,7 @@ def build_h5_targets(
     if workers <= 1 or len(files_to_process) <= 1:
         rows = []
         for index, path in enumerate(files_to_process, start=1):
-            row = _read_h5_observation(path, damping=damping, compute_psa=compute_psa)
+            row = _safe_read_h5_observation(path, damping=damping, compute_psa=compute_psa)
             rows.append(row)
             new_rows.append(row)
             batch_rows.append(row)

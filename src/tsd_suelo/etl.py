@@ -52,6 +52,15 @@ def build_waveform_targets(
         log=log,
         checkpoint_dir=checkpoint_dir,
     )
+    h5_errors = 0
+    if "read_ok" in targets.columns:
+        errors = targets[targets["read_ok"] == False].copy()  # noqa: E712
+        h5_errors = int(errors.shape[0])
+        if not errors.empty:
+            errors.to_csv(output_dir / "waveform_targets_errors.csv", index=False)
+            if log:
+                log(f"H5 con error={errors.shape[0]} -> {output_dir / 'waveform_targets_errors.csv'}")
+        targets = targets[targets["read_ok"] != False].copy()  # noqa: E712
     if "record_observed_id" in targets.columns:
         targets = targets.sort_values("record_observed_id").reset_index(drop=True)
     write_parquet(targets, output_dir / "waveform_targets_observed.parquet")
@@ -64,6 +73,7 @@ def build_waveform_targets(
             "compute_psa": compute_psa,
             "workers": workers,
             "h5_processed": int(targets.shape[0]),
+            "h5_errors": h5_errors,
             "checkpoint_dir": str(checkpoint_dir),
         },
     )

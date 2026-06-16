@@ -246,6 +246,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "observed_inventory.json",
                 "waveform_targets_observed.parquet",
                 "waveform_targets_observed.meta.json",
+                "waveform_targets_errors.csv",
                 "record_geometry.parquet",
                 "receiver_index.parquet",
                 "source3d_index.parquet",

@@ -84,6 +84,7 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     _write_h5(records_dir / "20200101000000_STA01.h5", "20200101000000", "STA01", 100.0)
     _write_h5(records_dir / "20200101000000_STA02.h5", "20200101000000", "STA02", 80.0)
     _write_h5(records_dir / "20200102000000_STA01.h5", "20200102000000", "STA01", 60.0)
+    (records_dir / "20200102000000_STA02.h5").write_text("not an hdf5 file", encoding="utf-8")
 
     out = tmp_path / "outputs"
     manifest = run_build(PipelineConfig(records_dir=records_dir, flatfiles_dir=flatfiles_dir, output_dir=out))
@@ -98,6 +99,9 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
     assert set(geo["observed_source"]) == {"h5", "flatfile"}
     assert (out / "results_report.html").exists()
+    assert (out / "waveform_targets_errors.csv").exists()
+    meta = pd.read_json(out / "waveform_targets_observed.meta.json", typ="series")
+    assert int(meta["h5_errors"]) == 1
 
     reused = run_build(
         PipelineConfig(
