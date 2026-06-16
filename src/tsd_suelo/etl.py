@@ -36,16 +36,65 @@ def build_waveform_targets(records_dir: Path, output_dir: Path, max_h5: int | No
     return targets
 
 
+def _record_key(df: pd.DataFrame) -> pd.Series:
+    return df["event_id"].astype(str) + "_" + df["station_id"].astype(str)
+
+
+def _flatfile_waveform_targets(records: pd.DataFrame, existing_keys: set[str]) -> pd.DataFrame:
+    keys = _record_key(records)
+    flat = records.loc[~keys.isin(existing_keys)].copy()
+    if flat.empty:
+        return pd.DataFrame(columns=["record_observed_id", "event_id", "station_id", "observed_source"])
+    out = pd.DataFrame(index=flat.index)
+    out["record_observed_id"] = _record_key(flat)
+    out["event_id"] = flat["event_id"]
+    out["station_id"] = flat["station_id"]
+    out["observed_source"] = "flatfile"
+    out["h5_file"] = None
+    out["h5_name"] = None
+    out["dt_s"] = np.nan
+    out["sample_rate_hz"] = flat.get("sample_rate_hz_flatfile", np.nan)
+    out["pga_e_g"] = flat.get("flat_pga_g_e", np.nan)
+    out["pga_n_g"] = flat.get("flat_pga_g_n", np.nan)
+    out["pga_z_g"] = flat.get("flat_pga_g_z", np.nan)
+    out["pga_h_g"] = flat.get("flat_pga_hmax_g", np.nan)
+    out["arias_e_m_s"] = flat.get("flat_arias_m_s_e", np.nan)
+    out["arias_n_m_s"] = flat.get("flat_arias_m_s_n", np.nan)
+    out["arias_z_m_s"] = flat.get("flat_arias_m_s_z", np.nan)
+    out["arias_h_m_s"] = out[["arias_e_m_s", "arias_n_m_s"]].max(axis=1, skipna=True)
+    out["duration_5_75_e_s"] = flat.get("flat_duration_5_75_s_e", np.nan)
+    out["duration_5_75_n_s"] = flat.get("flat_duration_5_75_s_n", np.nan)
+    out["duration_5_75_z_s"] = flat.get("flat_duration_5_75_s_z", np.nan)
+    out["duration_5_95_e_s"] = flat.get("flat_duration_5_95_s_e", np.nan)
+    out["duration_5_95_n_s"] = flat.get("flat_duration_5_95_s_n", np.nan)
+    out["duration_5_95_z_s"] = flat.get("flat_duration_5_95_s_z", np.nan)
+    out["duration_5_75_h_s"] = out[["duration_5_75_e_s", "duration_5_75_n_s"]].mean(axis=1, skipna=True)
+    out["duration_5_95_h_s"] = out[["duration_5_95_e_s", "duration_5_95_n_s"]].mean(axis=1, skipna=True)
+    out["horizontal_to_vertical_pga"] = out["pga_h_g"] / out["pga_z_g"].replace(0, np.nan)
+    out["east_to_north_pga"] = out["pga_e_g"] / out["pga_n_g"].replace(0, np.nan)
+    for period in (0.1, 0.2, 0.5, 1.0, 2.0):
+        out[f"psa_t{str(period).replace('.', 'p')}_g"] = flat.get(f"flat_psa_t{str(period).replace('.', 'p')}_g", np.nan)
+    return out.reset_index(drop=True)
+
+
 def build_geo_targets(
     waveform_targets: pd.DataFrame,
     flatfiles_dir: Path,
     output_dir: Path,
+    include_flatfile_only: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     events = load_events(flatfiles_dir)
     records = load_record_flatfile(flatfiles_dir)
     stations = load_stations(flatfiles_dir)
 
-    observed = waveform_targets.merge(records, on=["event_id", "station_id"], how="left", suffixes=("", "_record"))
+    observed_targets = waveform_targets.copy()
+    observed_targets["observed_source"] = "h5"
+    if include_flatfile_only:
+        existing_keys = set(_record_key(observed_targets))
+        flat_targets = _flatfile_waveform_targets(records, existing_keys)
+        observed_targets = pd.concat([observed_targets, flat_targets], ignore_index=True, sort=False)
+
+    observed = observed_targets.merge(records, on=["event_id", "station_id"], how="left", suffixes=("", "_record"))
     observed = observed.merge(events, on="event_id", how="left", suffixes=("", "_event"))
     observed = observed.merge(stations, on="station_id", how="left", suffixes=("", "_station"))
 
@@ -128,4 +177,3 @@ def build_geo_targets(
     write_parquet(source_index, output_dir / "source3d_index.parquet")
     write_parquet(observed, output_dir / "geo_targets_observed.parquet")
     return observed, geometry, receiver_index, source_index
-

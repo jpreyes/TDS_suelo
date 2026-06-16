@@ -2,11 +2,11 @@
 
 TSD-Suelo es un sistema independiente para identificar dinamica compatible del suelo desde observaciones. No es un GMPE clasico y no hereda scripts, parquets, runners ni dependencias internas de GMPE, Modelo E o TSD estructural.
 
-Fuentes primarias permitidas:
+Fuentes primarias permitidas, normalmente fuera de la carpeta del proyecto:
 
 ```text
-C:\Respaldos\records\*.h5
-C:\Respaldos\records\flatfiles\*.csv
+../records/*.h5
+../records/flatfiles/*.csv
 ```
 
 ## Objetivo
@@ -19,26 +19,65 @@ fuente 3D -> ruta -> receptor/suelo -> targets fisicos observados -> residuos ->
 
 El forward condicionado queda preparado como contrato posterior, pero no se ajusta ni genera acelerogramas sinteticos en esta etapa.
 
-## Instalacion local
+## Instalacion En Linux Mint
 
-```powershell
-cd C:\Respaldos\TDS_suelo
-python -m pip install -e .[dev]
+```bash
+git clone <URL_DEL_REPO> TDS_suelo
+cd TDS_suelo
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
-Tambien se puede ejecutar sin instalar:
+Por defecto el proyecto busca datos en rutas relativas:
 
-```powershell
-$env:PYTHONPATH = "$PWD\src"
-python -m tsd_suelo build --records-dir C:\Respaldos\records --flatfiles-dir C:\Respaldos\records\flatfiles --output-dir outputs
+```text
+../records
+../records/flatfiles
+```
+
+Tambien puedes pasar rutas relativas explicitas fuera del repo:
+
+```bash
+tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../records/flatfiles \
+  --output-dir outputs
 ```
 
 ## CLI
 
-```powershell
+```bash
 tsd-suelo inventory
 tsd-suelo targets --max-h5 20
-tsd-suelo build --records-dir C:\Respaldos\records --flatfiles-dir C:\Respaldos\records\flatfiles --output-dir outputs
+tsd-suelo build --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs
+tsd-suelo summary --output-dir outputs
+tsd-suelo report --output-dir outputs
+```
+
+`build` usa todos los H5 disponibles y agrega registros `flatfile-only` cuando no hay H5 correspondiente. Para usar solo H5:
+
+```bash
+tsd-suelo build --h5-only --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs_h5
+```
+
+## Mascara De Chile
+
+El build aplica una mascara gruesa incorporada de Chile y escribe `outputs/chile_mask.geojson`. Para usar una mascara oficial local:
+
+```bash
+tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../records/flatfiles \
+  --mask-geojson ../geodata/chile_mask.geojson \
+  --output-dir outputs
+```
+
+Para diagnostico sin mascara:
+
+```bash
+tsd-suelo build --no-chile-mask --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs_nomask
 ```
 
 ## Productos
@@ -60,30 +99,61 @@ route_graph_observed.parquet
 kozyrev_graph_fields.parquet
 atlas_geologico.geojson
 atlas_geologico.kmz
+chile_mask.geojson
 forward_conditioning_template.json
 pipeline_manifest.json
+results_report.html
+results_summary.json
+top_kozyrev_anomalies.csv
+top_receiver_anomalies.csv
+top_route_anomalies.csv
 ```
 
 `outputs/` esta ignorado por git porque son artefactos reproducibles.
 
-## Flujo implementado
+## Flujo Implementado
 
 1. Inventario observado de H5, eventos, records y estaciones.
 2. ETL desde H5 y flatfiles.
 3. Geometria fuente-receptor: distancia, azimut, backazimut, incidencia y celdas multiescala.
-4. Targets fisicos desde H5: PGA, Arias, CAV, duraciones, energia por bandas, frecuencia dominante, centroides y PSA aproximada 5%.
-5. Tabla `geo_targets_observed.parquet`.
-6. Residualizacion por fuente/evento, magnitud, profundidad, distancia y sitio conocido (`Vs30`, HVSR, `kappa0`, pendiente).
-7. Modos latentes por PCA sobre residuos fisicos.
-8. Proyeccion en grafo Kozyrev fuente 3D -> ruta -> receptor.
-9. Atlas geologico GeoJSON/KMZ.
-10. Plantilla de forward condicionado posterior.
+4. Targets fisicos desde H5 cuando existe forma de onda.
+5. Targets observados del flatfile para registros sin H5.
+6. Tabla `geo_targets_observed.parquet`.
+7. Residualizacion por fuente/evento, magnitud, profundidad, distancia y sitio conocido (`Vs30`, HVSR, `kappa0`, pendiente).
+8. Modos latentes por PCA sobre residuos fisicos.
+9. Proyeccion en grafo Kozyrev fuente 3D -> ruta -> receptor.
+10. Atlas geologico GeoJSON/KMZ y reporte HTML.
+11. Plantilla de forward condicionado posterior.
 
 ## Tests
 
-```powershell
+```bash
 pytest
 ```
 
 Las pruebas usan H5 y flatfiles sinteticos temporales; no dependen de los datos reales.
+
+## Ver Resultados Por SSH
+
+Resumen en terminal:
+
+```bash
+tsd-suelo summary --output-dir outputs --top-n 20
+```
+
+Reporte HTML:
+
+```bash
+python -m http.server 8000 -d outputs
+```
+
+Desde tu maquina local:
+
+```bash
+ssh -L 8000:localhost:8000 usuario@servidor
+```
+
+Abre `http://localhost:8000/results_report.html`.
+
+Tambien puedes descargar `outputs/atlas_geologico.geojson` o `outputs/atlas_geologico.kmz` y abrirlos en QGIS/Google Earth.
 

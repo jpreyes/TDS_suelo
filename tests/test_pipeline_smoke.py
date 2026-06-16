@@ -59,6 +59,7 @@ def _write_flatfiles(flatfiles_dir: Path) -> None:
             {"RecordID": "r1", "EventID": "20200101000000", "StationID": "STA01", "EventLatitude_deg": -33.0, "EventLongitude_deg": -71.0, "EventDepth_km": 20.0, "Mw": 6.0, "TectonicType": "Interface", "StationLatitude_deg": -33.2, "StationLongitude_deg": -71.3, "StationVs30_m_s": 500, "Repi_km_": 20, "Rhyp_km_": 28, "Rrup_km_": 25, "PGA_g_N": 0.1, "PGA_g_E": 0.12, "PGA_g_Z": 0.04},
             {"RecordID": "r2", "EventID": "20200101000000", "StationID": "STA02", "EventLatitude_deg": -33.0, "EventLongitude_deg": -71.0, "EventDepth_km": 20.0, "Mw": 6.0, "TectonicType": "Interface", "StationLatitude_deg": -33.6, "StationLongitude_deg": -71.5, "StationVs30_m_s": 350, "Repi_km_": 60, "Rhyp_km_": 63, "Rrup_km_": 58, "PGA_g_N": 0.08, "PGA_g_E": 0.09, "PGA_g_Z": 0.03},
             {"RecordID": "r3", "EventID": "20200102000000", "StationID": "STA01", "EventLatitude_deg": -34.0, "EventLongitude_deg": -72.0, "EventDepth_km": 30.0, "Mw": 6.5, "TectonicType": "Intraslab", "StationLatitude_deg": -33.2, "StationLongitude_deg": -71.3, "StationVs30_m_s": 500, "Repi_km_": 90, "Rhyp_km_": 95, "Rrup_km_": 92, "PGA_g_N": 0.05, "PGA_g_E": 0.06, "PGA_g_Z": 0.02},
+            {"RecordID": "r4", "EventID": "20200102000000", "StationID": "STA02", "EventLatitude_deg": -34.0, "EventLongitude_deg": -72.0, "EventDepth_km": 30.0, "Mw": 6.5, "TectonicType": "Intraslab", "StationLatitude_deg": -33.6, "StationLongitude_deg": -71.5, "StationVs30_m_s": 350, "Repi_km_": 70, "Rhyp_km_": 76, "Rrup_km_": 74, "PGA_g_N": 0.04, "PGA_g_E": 0.045, "PGA_g_Z": 0.015},
         ]
     )
     records.to_csv(flatfiles_dir / "Flatfile_chileanRecord_v8.csv", index=False)
@@ -87,11 +88,13 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     out = tmp_path / "outputs"
     manifest = run_build(PipelineConfig(records_dir=records_dir, flatfiles_dir=flatfiles_dir, output_dir=out))
 
-    assert manifest["rows"]["geo_targets_observed"] == 3
+    assert manifest["rows"]["geo_targets_observed"] == 4
+    assert manifest["rows"]["flatfile_records_available"] == 1
     assert (out / "geo_targets_observed.parquet").exists()
     assert (out / "geo_residuals.parquet").exists()
     assert (out / "latent_modes.parquet").exists()
     assert (out / "atlas_geologico.geojson").exists()
     geo = pd.read_parquet(out / "geo_targets_observed.parquet")
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
-
+    assert set(geo["observed_source"]) == {"h5", "flatfile"}
+    assert (out / "results_report.html").exists()

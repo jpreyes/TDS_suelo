@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .graph import mode_columns
+from .mask import GeoMask, feature_in_mask, mask_feature
 from .utils import ensure_dir
 
 
@@ -58,7 +59,12 @@ def _merge_modes(geo_targets: pd.DataFrame, modes: pd.DataFrame) -> pd.DataFrame
     return geo_targets.merge(modes[keep], on="record_observed_id", how="left")
 
 
-def build_atlas_features(geo_targets: pd.DataFrame, modes: pd.DataFrame, kozyrev_fields: pd.DataFrame) -> list[dict[str, Any]]:
+def build_atlas_features(
+    geo_targets: pd.DataFrame,
+    modes: pd.DataFrame,
+    kozyrev_fields: pd.DataFrame,
+    geo_mask: GeoMask | None = None,
+) -> list[dict[str, Any]]:
     observed = _merge_modes(geo_targets, modes)
     mode_cols = mode_columns(observed)
     if mode_cols:
@@ -66,7 +72,7 @@ def build_atlas_features(geo_targets: pd.DataFrame, modes: pd.DataFrame, kozyrev
     else:
         observed["mode_anomaly_score"] = np.nan
 
-    features: list[dict[str, Any]] = []
+    features: list[dict[str, Any]] = [mask_feature(geo_mask)] if geo_mask else []
     station_agg = {
         "station_latitude_deg": "first",
         "station_longitude_deg": "first",
@@ -168,6 +174,10 @@ def build_atlas_features(geo_targets: pd.DataFrame, modes: pd.DataFrame, kozyrev
             if feature:
                 features.append(feature)
 
+    if geo_mask:
+        mask = features[:1]
+        masked = [feature for feature in features[1:] if feature_in_mask(feature, geo_mask)]
+        return mask + masked
     return features
 
 
@@ -190,6 +200,18 @@ def _kml_for_features(features: list[dict[str, Any]]) -> str:
         elif geometry.get("type") == "LineString":
             coords = " ".join(f"{lon},{lat},0" for lon, lat in geometry["coordinates"])
             geom_xml = f"<LineString><coordinates>{coords}</coordinates></LineString>"
+        elif geometry.get("type") == "Polygon":
+            ring = geometry["coordinates"][0]
+            coords = " ".join(f"{lon},{lat},0" for lon, lat, *_ in ring)
+            geom_xml = f"<Polygon><outerBoundaryIs><LinearRing><coordinates>{coords}</coordinates></LinearRing></outerBoundaryIs></Polygon>"
+        elif geometry.get("type") == "MultiPolygon":
+            parts = []
+            for polygon in geometry["coordinates"]:
+                if not polygon:
+                    continue
+                coords = " ".join(f"{lon},{lat},0" for lon, lat, *_ in polygon[0])
+                parts.append(f"<Polygon><outerBoundaryIs><LinearRing><coordinates>{coords}</coordinates></LinearRing></outerBoundaryIs></Polygon>")
+            geom_xml = "<MultiGeometry>" + "".join(parts) + "</MultiGeometry>"
         else:
             continue
         placemarks.append(f"<Placemark><name>{name}</name><description>{description}</description>{geom_xml}</Placemark>")
@@ -208,8 +230,13 @@ def write_kmz(features: list[dict[str, Any]], path: Path) -> None:
         kmz.writestr("doc.kml", kml)
 
 
-def write_atlas_products(geo_targets: pd.DataFrame, modes: pd.DataFrame, kozyrev_fields: pd.DataFrame, output_dir: Path) -> None:
-    features = build_atlas_features(geo_targets, modes, kozyrev_fields)
+def write_atlas_products(
+    geo_targets: pd.DataFrame,
+    modes: pd.DataFrame,
+    kozyrev_fields: pd.DataFrame,
+    output_dir: Path,
+    geo_mask: GeoMask | None = None,
+) -> None:
+    features = build_atlas_features(geo_targets, modes, kozyrev_fields, geo_mask=geo_mask)
     write_geojson(features, output_dir / "atlas_geologico.geojson")
     write_kmz(features, output_dir / "atlas_geologico.kmz")
-

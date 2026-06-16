@@ -5,11 +5,13 @@
 El repositorio solo consume:
 
 ```text
-records/*.h5
-records/flatfiles/*.csv
+../records/*.h5
+../records/flatfiles/*.csv
 ```
 
 No se importan scripts, parquets, caches, coeficientes, runners ni paquetes internos de GMPE, Modelo E o TSD estructural.
+
+Las rutas de datos son argumentos de CLI y pueden estar fuera del repo.
 
 ## Capas
 
@@ -26,6 +28,7 @@ No se importan scripts, parquets, caches, coeficientes, runners ni paquetes inte
 | F08 | Modos latentes | `latent_modes.parquet`, `latent_mode_components.csv` |
 | F09 | Kozyrev/grafo | `kozyrev_graph_fields.parquet` |
 | F10 | Atlas | `atlas_geologico.geojson`, `atlas_geologico.kmz` |
+| F11 | Reporte operativo | `results_report.html`, `top_*_anomalies.csv` |
 
 ## Residualizacion
 
@@ -47,6 +50,8 @@ pendiente topografica
 
 No se usa efecto fijo de estacion en esta etapa porque podria borrar la senal de suelo que se busca descubrir.
 
+Para escalar a los mas de 40 mil registros del flatfile, el efecto de fuente se aplica como correccion por grupo de evento despues de la base Mw/profundidad/distancia/sitio. Esto evita crear una matriz densa de miles de eventos.
+
 ## Kozyrev Multiescala
 
 Cada observacion genera celdas:
@@ -64,4 +69,3 @@ delta_Jk = modo_promedio_Jk - modo_promedio_padre_J(k-1)
 ```
 
 Esto deja candidatos a discontinuidades, cuencas, rutas anomalas y anisotropia direccional sin inventar geologia externa.
-

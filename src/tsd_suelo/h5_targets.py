@@ -25,7 +25,7 @@ ENERGY_BANDS_HZ = {
 
 def list_h5_files(records_dir: Path, max_h5: int | None = None) -> list[Path]:
     files = sorted(records_dir.glob("*.h5"))
-    return files[:max_h5] if max_h5 else files
+    return files[:max_h5] if max_h5 is not None else files
 
 
 def _dataset_scalar(h5: h5py.File, path: str) -> Any:

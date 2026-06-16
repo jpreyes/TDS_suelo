@@ -5,12 +5,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .utils import coalesce_columns, numeric_series, read_csv_str
+from .utils import coalesce_columns, numeric_series, parse_numeric_vector, read_csv_str
 
 
 EVENTS_CSV = "Flatfile_chileanEvents_v11.csv"
 RECORDS_CSV = "Flatfile_chileanRecord_v8.csv"
 STATIONS_CSV = "Flatfile_chileanSiteStation_v7.csv"
+PSA_PERIODS_S = (0.1, 0.2, 0.5, 1.0, 2.0)
 
 
 def _resolve_csv(flatfiles_dir: Path, filename: str) -> Path:
@@ -89,6 +90,9 @@ def load_record_flatfile(flatfiles_dir: Path) -> pd.DataFrame:
     out["flat_arias_m_s_n"] = numeric_series(df.get("Ia_ms_N", pd.Series(index=df.index)))
     out["flat_arias_m_s_e"] = numeric_series(df.get("Ia_ms_E", pd.Series(index=df.index)))
     out["flat_arias_m_s_z"] = numeric_series(df.get("Ia_ms_Z", pd.Series(index=df.index)))
+    out["flat_duration_5_75_s_n"] = numeric_series(df.get("Ds_5_to_75_N", pd.Series(index=df.index)))
+    out["flat_duration_5_75_s_e"] = numeric_series(df.get("Ds_5_to_75_E", pd.Series(index=df.index)))
+    out["flat_duration_5_75_s_z"] = numeric_series(df.get("Ds_5_to_75_Z", pd.Series(index=df.index)))
     out["flat_duration_5_95_s_n"] = numeric_series(df.get("Ds_5_to_95_N", pd.Series(index=df.index)))
     out["flat_duration_5_95_s_e"] = numeric_series(df.get("Ds_5_to_95_E", pd.Series(index=df.index)))
     out["flat_duration_5_95_s_z"] = numeric_series(df.get("Ds_5_to_95_Z", pd.Series(index=df.index)))
@@ -96,6 +100,9 @@ def load_record_flatfile(flatfiles_dir: Path) -> pd.DataFrame:
         out[["flat_pga_g_n", "flat_pga_g_e"]].to_numpy(dtype=float),
         axis=1,
     )
+    if {"Tn", "PSa_RotD50"}.issubset(df.columns):
+        psa = _extract_psa_periods(df["Tn"], df["PSa_RotD50"])
+        out = pd.concat([out, psa], axis=1)
     return out.drop_duplicates(["event_id", "station_id"])
 
 
@@ -106,3 +113,24 @@ def load_flatfiles(flatfiles_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.
         load_stations(flatfiles_dir),
     )
 
+
+def _extract_psa_periods(periods: pd.Series, psa_values: pd.Series) -> pd.DataFrame:
+    rows: list[dict[str, float]] = []
+    for period_text, psa_text in zip(periods, psa_values):
+        period_vec = parse_numeric_vector(period_text)
+        psa_vec = parse_numeric_vector(psa_text)
+        row: dict[str, float] = {}
+        if period_vec and psa_vec and len(period_vec) == len(psa_vec):
+            xp = np.asarray(period_vec, dtype=float)
+            fp = np.asarray(psa_vec, dtype=float)
+            order = np.argsort(xp)
+            xp = xp[order]
+            fp = fp[order]
+            for period in PSA_PERIODS_S:
+                key = f"flat_psa_t{str(period).replace('.', 'p')}_g"
+                row[key] = float(np.interp(period, xp, fp)) if xp[0] <= period <= xp[-1] else np.nan
+        else:
+            for period in PSA_PERIODS_S:
+                row[f"flat_psa_t{str(period).replace('.', 'p')}_g"] = np.nan
+        rows.append(row)
+    return pd.DataFrame(rows, index=periods.index)

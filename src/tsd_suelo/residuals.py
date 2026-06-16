@@ -71,13 +71,6 @@ def _design_matrix(df: pd.DataFrame, include_site: bool) -> pd.DataFrame:
         if dummies.shape[1] > 1:
             features = pd.concat([features, dummies.iloc[:, 1:]], axis=1)
 
-    if "event_id" in df.columns:
-        counts = df["event_id"].fillna("unknown").astype(str).value_counts()
-        eligible = df["event_id"].fillna("unknown").astype(str).where(lambda s: s.map(counts) >= 2, "event_singleton")
-        dummies = pd.get_dummies(eligible, prefix="event", dtype=float)
-        if dummies.shape[1] > 1:
-            features = pd.concat([features, dummies.iloc[:, 1:]], axis=1)
-
     if include_site:
         if "vs30_m_s" in df.columns:
             vs30 = numeric_series(df["vs30_m_s"]).where(lambda s: s > 0)
@@ -93,7 +86,17 @@ def _design_matrix(df: pd.DataFrame, include_site: bool) -> pd.DataFrame:
     return features.astype(float)
 
 
-def _fit_predict(x: pd.DataFrame, y: pd.Series) -> tuple[pd.Series, float, int]:
+def _group_effect(values: pd.Series, group: pd.Series | None) -> pd.Series:
+    if group is None:
+        return pd.Series(0.0, index=values.index)
+    group_key = group.fillna("unknown").astype(str)
+    counts = group_key.map(group_key.value_counts())
+    effects = values.groupby(group_key).transform("mean")
+    effects = effects.where(counts >= 2, 0.0)
+    return effects.fillna(0.0)
+
+
+def _fit_predict(x: pd.DataFrame, y: pd.Series, group: pd.Series | None = None) -> tuple[pd.Series, float, int]:
     mask = y.notna() & np.isfinite(y)
     pred = pd.Series(np.nan, index=y.index, dtype=float)
     n = int(mask.sum())
@@ -110,6 +113,8 @@ def _fit_predict(x: pd.DataFrame, y: pd.Series) -> tuple[pd.Series, float, int]:
     try:
         beta, *_ = np.linalg.lstsq(x_fit.to_numpy(dtype=float), y_fit.to_numpy(dtype=float), rcond=None)
         pred.loc[mask] = x_fit.to_numpy(dtype=float) @ beta
+        source_effect = _group_effect(y.loc[mask] - pred.loc[mask], group.loc[mask] if group is not None else None)
+        pred.loc[mask] = pred.loc[mask] + source_effect
     except np.linalg.LinAlgError:
         return pred, math.nan, n
     ss_res = float(np.sum((y_fit.to_numpy(dtype=float) - pred.loc[mask].to_numpy(dtype=float)) ** 2))
@@ -125,6 +130,7 @@ def residualize_targets(
     targets = available_targets(geo_targets, target_columns)
     base_x = _design_matrix(geo_targets, include_site=False)
     site_x = _design_matrix(geo_targets, include_site=True)
+    source_group = geo_targets["event_id"] if "event_id" in geo_targets.columns else None
     id_columns = [
         "record_observed_id",
         "event_id",
@@ -145,8 +151,8 @@ def residualize_targets(
     attribution_rows = []
     for target in targets:
         y = log_positive(geo_targets[target])
-        pred_base, r2_base, n = _fit_predict(base_x, y)
-        pred_site, r2_site, _ = _fit_predict(site_x, y)
+        pred_base, r2_base, n = _fit_predict(base_x, y, group=source_group)
+        pred_site, r2_site, _ = _fit_predict(site_x, y, group=source_group)
         residual = geo_targets[present_id_columns].copy()
         residual["target"] = target
         residual["target_value"] = numeric_series(geo_targets[target])
@@ -178,4 +184,3 @@ def write_residual_products(
 ) -> None:
     write_parquet(residuals, output_dir / "geo_residuals.parquet")
     attribution.to_csv(output_dir / "target_level_attribution.csv", index=False)
-

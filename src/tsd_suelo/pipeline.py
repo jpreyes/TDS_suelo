@@ -10,8 +10,10 @@ from .etl import build_geo_targets, build_inventory, build_waveform_targets
 from .forward import write_forward_template
 from .graph import build_kozyrev_fields, build_route_graph, write_graph_products
 from .latent import discover_latent_modes, write_latent_products
+from .mask import annotate_geo_targets, load_chile_mask, write_mask
+from .report import build_results_report
 from .residuals import residualize_targets, write_residual_products
-from .utils import ensure_dir, write_json
+from .utils import ensure_dir, write_json, write_parquet
 
 
 LogFn = Callable[[str], None]
@@ -44,7 +46,19 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
     waveform_targets = run_targets(cfg, log=log)
 
     _log(log, "F01-F06 geometria, indices fuente/receptor y geo_targets_observed")
-    geo_targets, geometry, receivers, sources = build_geo_targets(waveform_targets, cfg.flatfiles_dir, cfg.output_dir)
+    geo_targets, geometry, receivers, sources = build_geo_targets(
+        waveform_targets,
+        cfg.flatfiles_dir,
+        cfg.output_dir,
+        include_flatfile_only=cfg.include_flatfile_only,
+    )
+    geo_mask = None
+    if cfg.use_chile_mask:
+        _log(log, "Aplicando mascara de Chile")
+        geo_mask = load_chile_mask(cfg.mask_geojson)
+        write_mask(geo_mask, cfg.output_dir)
+        geo_targets = annotate_geo_targets(geo_targets, geo_mask)
+        write_parquet(geo_targets, cfg.output_dir / "geo_targets_observed.parquet")
 
     _log(log, "F07 residualizacion por fuente/distancia/sitio conocido")
     residuals, attribution = residualize_targets(geo_targets)
@@ -60,16 +74,20 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
     write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
 
     _log(log, "F10 atlas geologico observado")
-    write_atlas_products(geo_targets, modes, kozyrev_fields, cfg.output_dir)
+    write_atlas_products(geo_targets, modes, kozyrev_fields, cfg.output_dir, geo_mask=geo_mask)
 
     _log(log, "Contrato de forward condicionado posterior")
     write_forward_template(geo_targets, modes, cfg.output_dir)
+
+    _log(log, "Reporte de resultados")
+    build_results_report(cfg.output_dir, mask_geojson=cfg.mask_geojson)
 
     manifest = {
         "output_dir": str(cfg.output_dir),
         "inventory": inventory,
         "rows": {
             "waveform_targets_observed": int(waveform_targets.shape[0]),
+            "flatfile_records_available": int(max(0, geo_targets.shape[0] - waveform_targets.shape[0])),
             "record_geometry": int(geometry.shape[0]),
             "receiver_index": int(receivers.shape[0]),
             "source3d_index": int(sources.shape[0]),
@@ -94,9 +112,14 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
             "kozyrev_graph_fields.parquet",
             "atlas_geologico.geojson",
             "atlas_geologico.kmz",
+            "chile_mask.geojson",
             "forward_conditioning_template.json",
+            "results_report.html",
+            "results_summary.json",
+            "top_kozyrev_anomalies.csv",
+            "top_receiver_anomalies.csv",
+            "top_route_anomalies.csv",
         ],
     }
     write_json(cfg.output_dir / "pipeline_manifest.json", manifest)
     return manifest
-
