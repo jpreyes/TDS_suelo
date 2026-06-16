@@ -10,6 +10,7 @@ from .etl import build_geo_targets, build_inventory, build_waveform_targets
 from .forward import write_forward_template
 from .graph import build_kozyrev_fields, build_route_graph, write_graph_products
 from .latent import discover_latent_modes, write_latent_products
+from .logging_utils import PhaseTimer, RunLogger, format_seconds
 from .mask import annotate_geo_targets, load_chile_mask, write_mask
 from .report import build_results_report
 from .residuals import residualize_targets, write_residual_products
@@ -48,92 +49,147 @@ def run_targets(config: PipelineConfig, log: LogFn | None = None):
         damping=cfg.damping,
         compute_psa=cfg.compute_psa,
         workers=cfg.workers,
+        progress_every=cfg.progress_every,
+        log=log,
     )
 
 
 def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any]:
     cfg = config.resolved()
     ensure_dir(cfg.output_dir)
+    close_logger = False
+    run_logger = None
+    if log is None:
+        run_logger = RunLogger(cfg.log_file or (cfg.output_dir / "run.log"), verbose=not cfg.quiet)
+        log = run_logger
+        close_logger = True
 
-    inventory = run_inventory(cfg, log=log)
-    waveform_targets = run_targets(cfg, log=log)
+    import time
 
-    _log(log, "F01-F06 geometria, indices fuente/receptor y geo_targets_observed")
-    geo_targets, geometry, receivers, sources = build_geo_targets(
-        waveform_targets,
-        cfg.flatfiles_dir,
-        cfg.output_dir,
-        include_flatfile_only=cfg.include_flatfile_only,
-    )
-    geo_mask = None
-    if cfg.use_chile_mask:
-        _log(log, "Aplicando mascara de Chile")
-        geo_mask = load_chile_mask(cfg.mask_geojson)
-        write_mask(geo_mask, cfg.output_dir)
-        geo_targets = annotate_geo_targets(geo_targets, geo_mask)
-        write_parquet(geo_targets, cfg.output_dir / "geo_targets_observed.parquet")
+    build_start = time.perf_counter()
+    try:
+        _log(log, f"Output dir: {cfg.output_dir}")
+        _log(log, f"Log file: {cfg.log_file or (cfg.output_dir / 'run.log')}")
+        _log(
+            log,
+            "Config "
+            f"records={cfg.records_dir} flatfiles={cfg.flatfiles_dir} "
+            f"workers={cfg.workers} compute_psa={cfg.compute_psa} "
+            f"reuse_targets={cfg.reuse_targets} progress_every={cfg.progress_every}",
+        )
 
-    _log(log, "F07 residualizacion por fuente/distancia/sitio conocido")
-    residuals, attribution = residualize_targets(geo_targets)
-    write_residual_products(residuals, attribution, cfg.output_dir)
+        with PhaseTimer(log, "F00 inventario observado"):
+            inventory = run_inventory(cfg, log=None)
+            _log(
+                log,
+                "Inventario "
+                f"H5={inventory['h5_count']} "
+                f"records_flatfile={inventory['record_count_flatfile']} "
+                f"eventos={inventory['event_count_flatfile']} "
+                f"estaciones={inventory['station_count_flatfile']}",
+            )
 
-    _log(log, "F08 descubrimiento de modos latentes")
-    modes, components = discover_latent_modes(residuals)
-    write_latent_products(modes, components, cfg.output_dir)
+        with PhaseTimer(log, "F05 targets fisicos observados desde H5"):
+            waveform_targets = run_targets(cfg, log=log)
+            _log(log, f"Targets H5 filas={waveform_targets.shape[0]}")
 
-    _log(log, "F09 grafo Kozyrev fuente 3D -> ruta -> receptor")
-    route_graph = build_route_graph(geo_targets, modes)
-    kozyrev_fields = build_kozyrev_fields(geo_targets, modes)
-    write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
+        with PhaseTimer(log, "F01-F06 geometria, indices fuente/receptor y geo_targets_observed"):
+            geo_targets, geometry, receivers, sources = build_geo_targets(
+                waveform_targets,
+                cfg.flatfiles_dir,
+                cfg.output_dir,
+                include_flatfile_only=cfg.include_flatfile_only,
+            )
+            _log(
+                log,
+                f"Geo targets={geo_targets.shape[0]} "
+                f"geometria={geometry.shape[0]} receptores={receivers.shape[0]} fuentes={sources.shape[0]}",
+            )
 
-    _log(log, "F10 atlas geologico observado")
-    write_atlas_products(geo_targets, modes, kozyrev_fields, cfg.output_dir, geo_mask=geo_mask)
+        geo_mask = None
+        if cfg.use_chile_mask:
+            with PhaseTimer(log, "Mascara de Chile"):
+                geo_mask = load_chile_mask(cfg.mask_geojson)
+                write_mask(geo_mask, cfg.output_dir)
+                geo_targets = annotate_geo_targets(geo_targets, geo_mask)
+                write_parquet(geo_targets, cfg.output_dir / "geo_targets_observed.parquet")
+                _log(
+                    log,
+                    f"Mask={geo_mask.name} "
+                    f"receiver_in_mask={int(geo_targets['receiver_in_chile_mask'].sum())} "
+                    f"route_in_mask={int(geo_targets['route_in_chile_mask'].sum())}",
+                )
 
-    _log(log, "Contrato de forward condicionado posterior")
-    write_forward_template(geo_targets, modes, cfg.output_dir)
+        with PhaseTimer(log, "F07 residualizacion por fuente/distancia/sitio conocido"):
+            residuals, attribution = residualize_targets(geo_targets)
+            write_residual_products(residuals, attribution, cfg.output_dir)
+            _log(log, f"Residuals filas={residuals.shape[0]} targets={attribution.shape[0]}")
 
-    _log(log, "Reporte de resultados")
-    build_results_report(cfg.output_dir, mask_geojson=cfg.mask_geojson)
+        with PhaseTimer(log, "F08 descubrimiento de modos latentes"):
+            modes, components = discover_latent_modes(residuals)
+            write_latent_products(modes, components, cfg.output_dir)
+            _log(log, f"Modes filas={modes.shape[0]} components={components.shape[0]}")
 
-    manifest = {
-        "output_dir": str(cfg.output_dir),
-        "inventory": inventory,
-        "rows": {
-            "waveform_targets_observed": int(waveform_targets.shape[0]),
-            "flatfile_records_available": int(max(0, geo_targets.shape[0] - waveform_targets.shape[0])),
-            "record_geometry": int(geometry.shape[0]),
-            "receiver_index": int(receivers.shape[0]),
-            "source3d_index": int(sources.shape[0]),
-            "geo_targets_observed": int(geo_targets.shape[0]),
-            "geo_residuals": int(residuals.shape[0]),
-            "latent_modes": int(modes.shape[0]),
-            "route_graph_observed": int(route_graph.shape[0]),
-            "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
-        },
-        "products": [
-            "observed_inventory.json",
-            "waveform_targets_observed.parquet",
-            "waveform_targets_observed.meta.json",
-            "record_geometry.parquet",
-            "receiver_index.parquet",
-            "source3d_index.parquet",
-            "geo_targets_observed.parquet",
-            "geo_residuals.parquet",
-            "target_level_attribution.csv",
-            "latent_modes.parquet",
-            "latent_mode_components.csv",
-            "route_graph_observed.parquet",
-            "kozyrev_graph_fields.parquet",
-            "atlas_geologico.geojson",
-            "atlas_geologico.kmz",
-            "chile_mask.geojson",
-            "forward_conditioning_template.json",
-            "results_report.html",
-            "results_summary.json",
-            "top_kozyrev_anomalies.csv",
-            "top_receiver_anomalies.csv",
-            "top_route_anomalies.csv",
-        ],
-    }
-    write_json(cfg.output_dir / "pipeline_manifest.json", manifest)
-    return manifest
+        with PhaseTimer(log, "F09 grafo Kozyrev fuente 3D -> ruta -> receptor"):
+            route_graph = build_route_graph(geo_targets, modes)
+            kozyrev_fields = build_kozyrev_fields(geo_targets, modes)
+            write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
+            _log(log, f"Route graph filas={route_graph.shape[0]} Kozyrev fields filas={kozyrev_fields.shape[0]}")
+
+        with PhaseTimer(log, "F10 atlas geologico observado"):
+            write_atlas_products(geo_targets, modes, kozyrev_fields, cfg.output_dir, geo_mask=geo_mask)
+
+        with PhaseTimer(log, "Contrato de forward condicionado posterior"):
+            write_forward_template(geo_targets, modes, cfg.output_dir)
+
+        with PhaseTimer(log, "Reporte de resultados"):
+            build_results_report(cfg.output_dir, mask_geojson=cfg.mask_geojson)
+
+        manifest = {
+            "output_dir": str(cfg.output_dir),
+            "log_file": str(cfg.log_file or (cfg.output_dir / "run.log")),
+            "inventory": inventory,
+            "rows": {
+                "waveform_targets_observed": int(waveform_targets.shape[0]),
+                "flatfile_records_available": int(max(0, geo_targets.shape[0] - waveform_targets.shape[0])),
+                "record_geometry": int(geometry.shape[0]),
+                "receiver_index": int(receivers.shape[0]),
+                "source3d_index": int(sources.shape[0]),
+                "geo_targets_observed": int(geo_targets.shape[0]),
+                "geo_residuals": int(residuals.shape[0]),
+                "latent_modes": int(modes.shape[0]),
+                "route_graph_observed": int(route_graph.shape[0]),
+                "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
+            },
+            "products": [
+                "run.log",
+                "observed_inventory.json",
+                "waveform_targets_observed.parquet",
+                "waveform_targets_observed.meta.json",
+                "record_geometry.parquet",
+                "receiver_index.parquet",
+                "source3d_index.parquet",
+                "geo_targets_observed.parquet",
+                "geo_residuals.parquet",
+                "target_level_attribution.csv",
+                "latent_modes.parquet",
+                "latent_mode_components.csv",
+                "route_graph_observed.parquet",
+                "kozyrev_graph_fields.parquet",
+                "atlas_geologico.geojson",
+                "atlas_geologico.kmz",
+                "chile_mask.geojson",
+                "forward_conditioning_template.json",
+                "results_report.html",
+                "results_summary.json",
+                "top_kozyrev_anomalies.csv",
+                "top_receiver_anomalies.csv",
+                "top_route_anomalies.csv",
+            ],
+        }
+        write_json(cfg.output_dir / "pipeline_manifest.json", manifest)
+        _log(log, f"BUILD COMPLETO ({format_seconds(time.perf_counter() - build_start)})")
+        return manifest
+    finally:
+        if close_logger and run_logger is not None:
+            run_logger.close()

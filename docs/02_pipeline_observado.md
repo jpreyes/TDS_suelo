@@ -20,7 +20,8 @@ time tsd-suelo build \
   --flatfiles-dir ../flatfiles \
   --output-dir outputs_fast \
   --workers 8 \
-  --skip-psa
+  --skip-psa \
+  --progress-every 500
 ```
 
 `--skip-psa` omite el calculo oscilador por periodo desde H5. Los PSA RotD50 del flatfile siguen disponibles para registros flatfile. Para retomar:
@@ -28,6 +29,20 @@ time tsd-suelo build \
 ```bash
 tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_fast --reuse-targets --workers 8 --skip-psa
 ```
+
+El progreso queda en pantalla y en:
+
+```text
+outputs_fast/run.log
+```
+
+Monitoreo:
+
+```bash
+tail -f outputs_fast/run.log
+```
+
+Cada fase registra inicio, fin, duracion, filas generadas y avance H5 con porcentaje, velocidad y ETA.
 
 ## Convenciones De Claves
 

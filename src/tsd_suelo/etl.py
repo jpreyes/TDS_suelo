@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -37,6 +37,8 @@ def build_waveform_targets(
     damping: float = 0.05,
     compute_psa: bool = True,
     workers: int = 1,
+    progress_every: int = 500,
+    log: Callable[[str], None] | None = None,
 ) -> pd.DataFrame:
     targets = build_h5_targets(
         records_dir,
@@ -44,6 +46,8 @@ def build_waveform_targets(
         damping=damping,
         compute_psa=compute_psa,
         workers=workers,
+        progress_every=progress_every,
+        log=log,
     )
     if "record_observed_id" in targets.columns:
         targets = targets.sort_values("record_observed_id").reset_index(drop=True)

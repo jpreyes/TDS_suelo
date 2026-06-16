@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .config import DEFAULT_FLATFILES_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_RECORDS_DIR, PipelineConfig
+from .logging_utils import RunLogger
 from .pipeline import run_build, run_inventory, run_targets
 from .report import build_results_report, print_summary
 
@@ -28,6 +29,9 @@ def _base_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--workers", type=int, default=1, help="Procesos paralelos para leer H5.")
         cmd.add_argument("--skip-psa", action="store_true", help="Omite PSA desde H5 para primera corrida rapida.")
         cmd.add_argument("--reuse-targets", action="store_true", help="Reusa output waveform_targets_observed.parquet si existe.")
+        cmd.add_argument("--log-file", type=Path, default=None, help="Archivo de log. Por defecto outputs/run.log.")
+        cmd.add_argument("--progress-every", type=int, default=500, help="Reporta progreso H5 cada N archivos.")
+        cmd.add_argument("--quiet", action="store_true", help="Escribe log sin imprimir progreso en pantalla.")
     return parser
 
 
@@ -44,6 +48,9 @@ def _config_from_args(args: argparse.Namespace) -> PipelineConfig:
         workers=args.workers,
         compute_psa=not args.skip_psa,
         reuse_targets=args.reuse_targets,
+        log_file=args.log_file,
+        progress_every=args.progress_every,
+        quiet=args.quiet,
     )
 
 
@@ -51,18 +58,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = _base_parser()
     args = parser.parse_args(argv)
     cfg = _config_from_args(args)
-    log = lambda message: print(message, flush=True)
     if args.command == "inventory":
-        manifest = run_inventory(cfg, log=log)
+        with RunLogger(cfg.log_file or (cfg.output_dir.expanduser().resolve() / "run.log"), verbose=not cfg.quiet) as log:
+            manifest = run_inventory(cfg, log=log)
         print(f"H5: {manifest['h5_count']} | eventos: {manifest['event_count_flatfile']} | estaciones: {manifest['station_count_flatfile']}")
         return 0
     if args.command == "targets":
-        targets = run_targets(cfg, log=log)
+        with RunLogger(cfg.log_file or (cfg.output_dir.expanduser().resolve() / "run.log"), verbose=not cfg.quiet) as log:
+            targets = run_targets(cfg, log=log)
         print(f"waveform_targets_observed.parquet filas={targets.shape[0]}")
         return 0
     if args.command == "build":
-        manifest = run_build(cfg, log=log)
+        manifest = run_build(cfg, log=None)
         print(f"Build completo en {manifest['output_dir']}")
+        print(f"Log: {manifest['log_file']}")
         for name, rows in manifest["rows"].items():
             print(f"  {name}: {rows}")
         return 0

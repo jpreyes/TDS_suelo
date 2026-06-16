@@ -72,7 +72,8 @@ time tsd-suelo build \
   --flatfiles-dir ../flatfiles \
   --output-dir outputs_fast \
   --workers 8 \
-  --skip-psa
+  --skip-psa \
+  --progress-every 500
 ```
 
 Si se corta despues de haber calculado `waveform_targets_observed.parquet`, puedes retomar sin releer H5:
@@ -84,7 +85,8 @@ tsd-suelo build \
   --output-dir outputs_fast \
   --reuse-targets \
   --workers 8 \
-  --skip-psa
+  --skip-psa \
+  --progress-every 500
 ```
 
 Para medir tiempo antes del build completo:
@@ -100,6 +102,36 @@ time tsd-suelo targets \
 ```
 
 El archivo `outputs_bench/waveform_targets_observed.meta.json` deja registrado `h5_processed`, `workers` y si se calculo PSA.
+
+El build escribe progreso en pantalla y tambien en:
+
+```text
+outputs_fast/run.log
+```
+
+Para monitorear desde otra sesion SSH/tmux:
+
+```bash
+tail -f outputs_fast/run.log
+```
+
+Para escribir solo al log, sin imprimir en pantalla:
+
+```bash
+tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --output-dir outputs_fast \
+  --workers 8 \
+  --skip-psa \
+  --quiet
+```
+
+Puedes cambiar el archivo de log:
+
+```bash
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_fast --log-file logs/tsd_suelo.log
+```
 
 ## Mascara De Chile
 

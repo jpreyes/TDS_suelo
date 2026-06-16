@@ -4,12 +4,15 @@ import math
 from pathlib import Path
 from typing import Any
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections.abc import Callable
+import time
 
 import h5py
 import numpy as np
 import pandas as pd
 
 from .utils import as_clean_str, finite_or_nan, safe_float
+from .logging_utils import format_seconds
 
 
 G_CM_S2 = 980.665
@@ -255,10 +258,18 @@ def build_h5_targets(
     compute_psa: bool = True,
     workers: int = 1,
     progress_every: int = 500,
+    log: Callable[[str], None] | None = None,
 ) -> pd.DataFrame:
     files = list_h5_files(records_dir, max_h5=max_h5)
+    started = time.perf_counter()
+    if log:
+        log(f"H5 a procesar: {len(files)} | workers={workers} | compute_psa={compute_psa}")
     if workers <= 1 or len(files) <= 1:
-        rows = [_read_h5_observation(path, damping=damping, compute_psa=compute_psa) for path in files]
+        rows = []
+        for index, path in enumerate(files, start=1):
+            rows.append(_read_h5_observation(path, damping=damping, compute_psa=compute_psa))
+            if log and (index == 1 or index == len(files) or index % progress_every == 0):
+                _log_h5_progress(log, index, len(files), started)
         return pd.DataFrame(rows)
 
     rows: list[dict[str, Any]] = []
@@ -267,6 +278,18 @@ def build_h5_targets(
         futures = [executor.submit(_read_h5_worker, task) for task in tasks]
         for index, future in enumerate(as_completed(futures), start=1):
             rows.append(future.result())
-            if progress_every and index % progress_every == 0:
-                print(f"H5 procesados: {index}/{len(files)}", flush=True)
+            if log and (index == 1 or index == len(files) or index % progress_every == 0):
+                _log_h5_progress(log, index, len(files), started)
     return pd.DataFrame(rows)
+
+
+def _log_h5_progress(log: Callable[[str], None], done: int, total: int, started: float) -> None:
+    elapsed = time.perf_counter() - started
+    rate = done / elapsed if elapsed > 0 else 0.0
+    remaining = (total - done) / rate if rate > 0 else 0.0
+    pct = (done / total * 100.0) if total else 100.0
+    log(
+        "H5 progreso "
+        f"{done}/{total} ({pct:.1f}%) | "
+        f"{rate:.2f} H5/s | elapsed {format_seconds(elapsed)} | ETA {format_seconds(remaining)}"
+    )
