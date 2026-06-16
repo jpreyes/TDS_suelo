@@ -33,6 +33,7 @@ El progreso queda en pantalla y en:
 
 ```text
 outputs_precomputed/run.log
+outputs_precomputed/_h5_target_batches/
 ```
 
 Monitoreo:
@@ -42,6 +43,8 @@ tail -f outputs_precomputed/run.log
 ```
 
 Cada fase registra inicio, fin, duracion, filas generadas y avance H5 con porcentaje, velocidad y ETA.
+
+Si la corrida se interrumpe durante H5, repetir el mismo comando reutiliza los batches en `_h5_target_batches` y procesa solo lo pendiente.
 
 Si la corrida se corta despues de `waveform_targets_observed.parquet`, pero antes de terminar todos los productos:
 

@@ -40,6 +40,8 @@ def build_waveform_targets(
     progress_every: int = 500,
     log: Callable[[str], None] | None = None,
 ) -> pd.DataFrame:
+    mode_name = f"psa_damping_{str(damping).replace('.', 'p')}" if compute_psa else "no_psa"
+    checkpoint_dir = output_dir / "_h5_target_batches" / mode_name
     targets = build_h5_targets(
         records_dir,
         max_h5=max_h5,
@@ -48,6 +50,7 @@ def build_waveform_targets(
         workers=workers,
         progress_every=progress_every,
         log=log,
+        checkpoint_dir=checkpoint_dir,
     )
     if "record_observed_id" in targets.columns:
         targets = targets.sort_values("record_observed_id").reset_index(drop=True)
@@ -61,6 +64,7 @@ def build_waveform_targets(
             "compute_psa": compute_psa,
             "workers": workers,
             "h5_processed": int(targets.shape[0]),
+            "checkpoint_dir": str(checkpoint_dir),
         },
     )
     return targets

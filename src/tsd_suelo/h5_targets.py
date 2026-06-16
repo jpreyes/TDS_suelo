@@ -259,37 +259,123 @@ def build_h5_targets(
     workers: int = 1,
     progress_every: int = 500,
     log: Callable[[str], None] | None = None,
+    checkpoint_dir: Path | None = None,
 ) -> pd.DataFrame:
     files = list_h5_files(records_dir, max_h5=max_h5)
+    completed_names: set[str] = set()
+    existing_batches: list[Path] = []
+    batch_index = 1
+    if checkpoint_dir:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        existing_batches = sorted(checkpoint_dir.glob("part_*.parquet"))
+        completed_names = _completed_h5_names(existing_batches)
+        if existing_batches:
+            batch_index = _next_batch_index(existing_batches)
+        files_to_process = [path for path in files if path.name not in completed_names]
+    else:
+        files_to_process = files
     started = time.perf_counter()
     if log:
-        log(f"H5 a procesar: {len(files)} | workers={workers} | compute_psa={compute_psa}")
-    if workers <= 1 or len(files) <= 1:
+        log(
+            f"H5 total={len(files)} | ya_checkpoint={len(completed_names)} | "
+            f"pendientes={len(files_to_process)} | workers={workers} | compute_psa={compute_psa}"
+        )
+    new_rows: list[dict[str, Any]] = []
+    batch_rows: list[dict[str, Any]] = []
+    if workers <= 1 or len(files_to_process) <= 1:
         rows = []
-        for index, path in enumerate(files, start=1):
-            rows.append(_read_h5_observation(path, damping=damping, compute_psa=compute_psa))
-            if log and (index == 1 or index == len(files) or index % progress_every == 0):
-                _log_h5_progress(log, index, len(files), started)
-        return pd.DataFrame(rows)
+        for index, path in enumerate(files_to_process, start=1):
+            row = _read_h5_observation(path, damping=damping, compute_psa=compute_psa)
+            rows.append(row)
+            new_rows.append(row)
+            batch_rows.append(row)
+            if checkpoint_dir and len(batch_rows) >= progress_every:
+                _write_batch(checkpoint_dir, batch_index, batch_rows)
+                batch_index += 1
+                batch_rows = []
+            if log and (index == 1 or index == len(files_to_process) or index % progress_every == 0):
+                _log_h5_progress(log, len(completed_names) + index, len(files), index, len(files_to_process), started)
+        if checkpoint_dir and batch_rows:
+            _write_batch(checkpoint_dir, batch_index, batch_rows)
+        return _combine_batches(existing_batches, new_rows, checkpoint_dir)
 
     rows: list[dict[str, Any]] = []
-    tasks = [(str(path), damping, compute_psa) for path in files]
+    tasks = [(str(path), damping, compute_psa) for path in files_to_process]
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(_read_h5_worker, task) for task in tasks]
         for index, future in enumerate(as_completed(futures), start=1):
-            rows.append(future.result())
-            if log and (index == 1 or index == len(files) or index % progress_every == 0):
-                _log_h5_progress(log, index, len(files), started)
-    return pd.DataFrame(rows)
+            row = future.result()
+            rows.append(row)
+            new_rows.append(row)
+            batch_rows.append(row)
+            if checkpoint_dir and len(batch_rows) >= progress_every:
+                _write_batch(checkpoint_dir, batch_index, batch_rows)
+                batch_index += 1
+                batch_rows = []
+            if log and (index == 1 or index == len(files_to_process) or index % progress_every == 0):
+                _log_h5_progress(log, len(completed_names) + index, len(files), index, len(files_to_process), started)
+    if checkpoint_dir and batch_rows:
+        _write_batch(checkpoint_dir, batch_index, batch_rows)
+    return _combine_batches(existing_batches, new_rows, checkpoint_dir)
 
 
-def _log_h5_progress(log: Callable[[str], None], done: int, total: int, started: float) -> None:
+def _completed_h5_names(batch_files: list[Path]) -> set[str]:
+    completed: set[str] = set()
+    for path in batch_files:
+        try:
+            frame = pd.read_parquet(path, columns=["h5_name"])
+        except Exception:
+            continue
+        completed.update(frame["h5_name"].dropna().astype(str).tolist())
+    return completed
+
+
+def _next_batch_index(batch_files: list[Path]) -> int:
+    numbers = []
+    for path in batch_files:
+        try:
+            numbers.append(int(path.stem.split("_")[1]))
+        except (IndexError, ValueError):
+            continue
+    return (max(numbers) + 1) if numbers else 1
+
+
+def _write_batch(checkpoint_dir: Path, batch_index: int, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    path = checkpoint_dir / f"part_{batch_index:06d}.parquet"
+    pd.DataFrame(rows).to_parquet(path, index=False)
+
+
+def _combine_batches(existing_batches: list[Path], new_rows: list[dict[str, Any]], checkpoint_dir: Path | None) -> pd.DataFrame:
+    frames = []
+    batch_files = sorted(checkpoint_dir.glob("part_*.parquet")) if checkpoint_dir else existing_batches
+    for path in batch_files:
+        frames.append(pd.read_parquet(path))
+    if not checkpoint_dir and new_rows:
+        frames.append(pd.DataFrame(new_rows))
+    if not frames:
+        return pd.DataFrame(new_rows)
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    if "record_observed_id" in combined.columns:
+        combined = combined.drop_duplicates("record_observed_id", keep="last")
+    return combined
+
+
+def _log_h5_progress(
+    log: Callable[[str], None],
+    done_total: int,
+    total: int,
+    done_current: int,
+    pending_current: int,
+    started: float,
+) -> None:
     elapsed = time.perf_counter() - started
-    rate = done / elapsed if elapsed > 0 else 0.0
-    remaining = (total - done) / rate if rate > 0 else 0.0
-    pct = (done / total * 100.0) if total else 100.0
+    rate = done_current / elapsed if elapsed > 0 else 0.0
+    remaining = (pending_current - done_current) / rate if rate > 0 else 0.0
+    pct = (done_total / total * 100.0) if total else 100.0
     log(
         "H5 progreso "
-        f"{done}/{total} ({pct:.1f}%) | "
+        f"{done_total}/{total} ({pct:.1f}%) | "
         f"{rate:.2f} H5/s | elapsed {format_seconds(elapsed)} | ETA {format_seconds(remaining)}"
     )

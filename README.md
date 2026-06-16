@@ -119,6 +119,7 @@ El build escribe progreso en pantalla y tambien en:
 
 ```text
 outputs_precomputed/run.log
+outputs_precomputed/_h5_target_batches/
 ```
 
 Para monitorear desde otra sesion SSH/tmux:
@@ -126,6 +127,8 @@ Para monitorear desde otra sesion SSH/tmux:
 ```bash
 tail -f outputs_precomputed/run.log
 ```
+
+Si la corrida se cae durante la lectura de H5, repite el mismo comando. El extractor lee los batches existentes en `_h5_target_batches` y continua con los H5 pendientes. No necesitas esperar a que exista el parquet final para retomar.
 
 Para escribir solo al log, sin imprimir en pantalla:
 
