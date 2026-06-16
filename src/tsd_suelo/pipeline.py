@@ -16,6 +16,7 @@ from .logging_utils import PhaseTimer, RunLogger, format_seconds
 from .mask import annotate_geo_targets, load_chile_mask, write_mask
 from .report import build_results_report
 from .residuals import residualize_targets, write_residual_products
+from .ultrametric import build_ultrametric_edges, build_ultrametric_nodes, kozyrev_heatmap_features, write_ultrametric_products
 from .utils import ensure_dir, write_json, write_parquet
 
 
@@ -41,6 +42,16 @@ def _read_csv(path: Path):
     import pandas as pd
 
     return pd.read_csv(path)
+
+
+def _parquet_has_columns(path: Path, columns: set[str]) -> bool:
+    if not path.exists():
+        return False
+    try:
+        frame = _read_parquet(path)
+    except Exception:
+        return False
+    return columns.issubset(frame.columns)
 
 
 def run_inventory(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any]:
@@ -217,6 +228,35 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
             _log(log, f"Route graph filas={route_graph.shape[0]} Kozyrev fields filas={kozyrev_fields.shape[0]}")
 
+        with PhaseTimer(log, "F09a grafo ultrametrico Kozyrev probabilistico"):
+            ultrametric_paths = [
+                cfg.output_dir / "kozyrev_ultrametric_nodes.parquet",
+                cfg.output_dir / "kozyrev_ultrametric_edges.parquet",
+                cfg.output_dir / "kozyrev_ultrametric_nodes.geojson",
+                cfg.output_dir / "kozyrev_ultrametric_edges.geojson",
+                cfg.output_dir / "kozyrev_heatmap.geojson",
+                cfg.output_dir / "kozyrev_heatmap.kmz",
+            ]
+            can_reuse_ultrametric = (
+                cfg.reuse_products
+                and _all_exist(ultrametric_paths)
+                and _parquet_has_columns(ultrametric_paths[0], {"failure_probability_pct"})
+                and _parquet_has_columns(ultrametric_paths[1], {"edge_probability_pct"})
+            )
+            if can_reuse_ultrametric:
+                _log(log, "Reusando grafo ultrametrico Kozyrev existente")
+                ultrametric_nodes = _read_parquet(ultrametric_paths[0])
+                ultrametric_edges = _read_parquet(ultrametric_paths[1])
+            else:
+                ultrametric_nodes = build_ultrametric_nodes(geo_targets, kozyrev_fields)
+                ultrametric_edges = build_ultrametric_edges(route_graph, ultrametric_nodes)
+                write_ultrametric_products(ultrametric_nodes, ultrametric_edges, cfg.output_dir)
+            _log(
+                log,
+                f"Ultrametric nodes={ultrametric_nodes.shape[0]} "
+                f"edges={ultrametric_edges.shape[0]}",
+            )
+
         with PhaseTimer(log, "F09b candidatos de falla observados"):
             fault_paths = [
                 cfg.output_dir / "fault_candidates.parquet",
@@ -224,7 +264,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 cfg.output_dir / "fault_candidates.geojson",
                 cfg.output_dir / "fault_candidates.kmz",
             ]
-            if cfg.reuse_products and _all_exist(fault_paths):
+            if cfg.reuse_products and _all_exist(fault_paths) and _parquet_has_columns(fault_paths[0], {"fault_probability_pct"}):
                 _log(log, "Reusando fault_candidates existentes")
                 fault_candidates = _read_parquet(fault_paths[0])
             else:
@@ -239,7 +279,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 kozyrev_fields,
                 cfg.output_dir,
                 geo_mask=geo_mask,
-                extra_features=fault_candidate_features(fault_candidates.head(200)),
+                extra_features=kozyrev_heatmap_features(ultrametric_nodes, ultrametric_edges) + fault_candidate_features(fault_candidates),
             )
 
         with PhaseTimer(log, "F11 dinamica compatible para forward condicionado"):
@@ -248,7 +288,11 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 cfg.output_dir / "forward_conditioning_profiles.parquet",
                 cfg.output_dir / "forward_conditioning_template.json",
             ]
-            if cfg.reuse_products and _all_exist(forward_paths):
+            if (
+                cfg.reuse_products
+                and _all_exist(forward_paths)
+                and _parquet_has_columns(forward_paths[0], {"dynamic_anomaly_score", "forward_support_weight", "fault_probability_pct"})
+            ):
                 _log(log, "Reusando compatible_dynamics/forward_conditioning_profiles existentes")
                 compatible_dynamics = _read_parquet(forward_paths[0])
                 forward_profiles = _read_parquet(forward_paths[1])
@@ -285,6 +329,8 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "latent_modes": int(modes.shape[0]),
                 "route_graph_observed": int(route_graph.shape[0]),
                 "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
+                "kozyrev_ultrametric_nodes": int(ultrametric_nodes.shape[0]),
+                "kozyrev_ultrametric_edges": int(ultrametric_edges.shape[0]),
                 "fault_candidates": int(fault_candidates.shape[0]),
                 "compatible_dynamics": int(compatible_dynamics.shape[0]),
                 "forward_conditioning_profiles": int(forward_profiles.shape[0]),
@@ -305,6 +351,12 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "latent_mode_components.csv",
                 "route_graph_observed.parquet",
                 "kozyrev_graph_fields.parquet",
+                "kozyrev_ultrametric_nodes.parquet",
+                "kozyrev_ultrametric_edges.parquet",
+                "kozyrev_ultrametric_nodes.geojson",
+                "kozyrev_ultrametric_edges.geojson",
+                "kozyrev_heatmap.geojson",
+                "kozyrev_heatmap.kmz",
                 "fault_candidates.parquet",
                 "top_fault_candidates.csv",
                 "fault_candidates.geojson",

@@ -45,7 +45,7 @@ def build_fault_candidates(
     geo_targets: pd.DataFrame,
     modes: pd.DataFrame,
     kozyrev_fields: pd.DataFrame,
-    top_n: int = 500,
+    top_n: int | None = None,
     min_records: int = 1,
 ) -> pd.DataFrame:
     """Build observed fault/lineament candidates from route anomalies.
@@ -135,7 +135,11 @@ def build_fault_candidates(
         + 0.12 * _rank01(grouped["pga_h_g_mean"])
         + 0.10 * _rank01(np.log1p(grouped["n_records"]))
     )
-    grouped = grouped.sort_values("fault_candidate_score", ascending=False).head(top_n).reset_index(drop=True)
+    grouped["fault_probability_pct"] = (100.0 * grouped["fault_candidate_score"]).clip(0.0, 100.0)
+    grouped["probability_basis"] = "empirical_route_percentile"
+    grouped = grouped.sort_values("fault_candidate_score", ascending=False).reset_index(drop=True)
+    if top_n is not None:
+        grouped = grouped.head(top_n).reset_index(drop=True)
     grouped.insert(0, "candidate_id", [f"fault_candidate_{idx:06d}" for idx in range(1, len(grouped) + 1)])
     grouped.insert(1, "priority_rank", np.arange(1, len(grouped) + 1))
 
@@ -193,6 +197,6 @@ def fault_candidate_features(candidates: pd.DataFrame) -> list[dict[str, Any]]:
 def write_fault_products(candidates: pd.DataFrame, output_dir: Path, top_n: int = 200) -> None:
     write_parquet(candidates, output_dir / "fault_candidates.parquet")
     candidates.head(top_n).to_csv(output_dir / "top_fault_candidates.csv", index=False)
-    features = fault_candidate_features(candidates.head(top_n))
+    features = fault_candidate_features(candidates)
     write_geojson(features, output_dir / "fault_candidates.geojson")
     write_kmz(features, output_dir / "fault_candidates.kmz")

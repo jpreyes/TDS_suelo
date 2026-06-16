@@ -27,6 +27,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     modes = _read_optional_parquet(output_dir / "latent_modes.parquet")
     kozyrev = _read_optional_parquet(output_dir / "kozyrev_graph_fields.parquet")
     route_graph = _read_optional_parquet(output_dir / "route_graph_observed.parquet")
+    ultrametric_nodes = _read_optional_parquet(output_dir / "kozyrev_ultrametric_nodes.parquet")
+    ultrametric_edges = _read_optional_parquet(output_dir / "kozyrev_ultrametric_edges.parquet")
     faults = _read_optional_parquet(output_dir / "fault_candidates.parquet")
     compatible = _read_optional_parquet(output_dir / "compatible_dynamics.parquet")
     profiles = _read_optional_parquet(output_dir / "forward_conditioning_profiles.parquet")
@@ -39,6 +41,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     receiver_top = _top_receivers(geo_modes, top_n)
     route_top = _top_routes(route_graph, top_n)
     fault_top = _top_faults(faults, top_n)
+    ultrametric_node_top = _top_ultrametric_nodes(ultrametric_nodes, top_n)
+    ultrametric_edge_top = _top_ultrametric_edges(ultrametric_edges, top_n)
 
     kozyrev_top.to_csv(output_dir / "top_kozyrev_anomalies.csv", index=False)
     receiver_top.to_csv(output_dir / "top_receiver_anomalies.csv", index=False)
@@ -53,6 +57,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         "events": int(geo["event_id"].nunique()) if "event_id" in geo else 0,
         "route_edges": int(route_graph.shape[0]),
         "kozyrev_nodes": int(kozyrev.shape[0]),
+        "ultrametric_nodes": int(ultrametric_nodes.shape[0]),
+        "ultrametric_edges": int(ultrametric_edges.shape[0]),
         "fault_candidates": int(faults.shape[0]),
         "compatible_dynamics": int(compatible.shape[0]),
         "forward_profiles": int(profiles.shape[0]),
@@ -65,10 +71,14 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         summary=summary,
         attribution=attribution.head(top_n),
         kozyrev_top=kozyrev_top,
+        ultrametric_node_top=ultrametric_node_top,
+        ultrametric_edge_top=ultrametric_edge_top,
         fault_top=fault_top,
         receiver_top=receiver_top,
         route_top=route_top,
         geo_modes=geo_modes,
+        ultrametric_nodes=ultrametric_nodes,
+        ultrametric_edges=ultrametric_edges,
         mask=mask,
     )
     (output_dir / "results_report.html").write_text(html_text, encoding="utf-8")
@@ -97,6 +107,8 @@ def print_summary(output_dir: Path, top_n: int = 10) -> str:
                 f"Flatfile-only usados: {summary.get('flatfile_records', 0)}",
                 f"Receptores dentro mascara Chile: {summary.get('receiver_in_chile_mask', 0)}",
                 f"Rutas dentro mascara Chile: {summary.get('route_in_chile_mask', 0)}",
+                f"Nodos ultrametricos Kozyrev: {summary.get('ultrametric_nodes', 0)}",
+                f"Aristas ultrametricas Kozyrev: {summary.get('ultrametric_edges', 0)}",
             ]
         )
     if not kozyrev.empty:
@@ -110,6 +122,7 @@ def print_summary(output_dir: Path, top_n: int = 10) -> str:
                 "- "
                 f"{getattr(row, 'candidate_id', '')}: "
                 f"score={getattr(row, 'fault_candidate_score', np.nan):.3f}, "
+                f"prob={getattr(row, 'fault_probability_pct', np.nan):.1f}%, "
                 f"strike={getattr(row, 'strike_deg', np.nan):.1f}, "
                 f"n={getattr(row, 'n_records', 0)}"
             )
@@ -201,20 +214,62 @@ def _top_faults(faults: pd.DataFrame, top_n: int) -> pd.DataFrame:
         "mode_anomaly_p90",
         "kozyrev_delta_norm",
         "pga_h_g_mean",
+        "fault_probability_pct",
         score,
         "interpretation",
     ]
     return faults.sort_values(score, ascending=False)[[c for c in cols if c in faults.columns]].head(top_n)
 
 
+def _top_ultrametric_nodes(nodes: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if nodes.empty or "failure_probability_pct" not in nodes.columns:
+        return pd.DataFrame()
+    cols = [
+        "node_type",
+        "level",
+        "node_id",
+        "parent_node_id",
+        "n_records",
+        "centroid_latitude_deg",
+        "centroid_longitude_deg",
+        "failure_probability_pct",
+        "delta_probability_pct",
+        "mode_probability_pct",
+        "support_probability_pct",
+    ]
+    return nodes.sort_values("failure_probability_pct", ascending=False)[[c for c in cols if c in nodes.columns]].head(top_n)
+
+
+def _top_ultrametric_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if edges.empty or "edge_probability_pct" not in edges.columns:
+        return pd.DataFrame()
+    cols = [
+        "edge_family",
+        "edge_type",
+        "from_level",
+        "to_level",
+        "from_node",
+        "to_node",
+        "n_records",
+        "edge_probability_pct",
+        "from_failure_probability_pct",
+        "to_failure_probability_pct",
+    ]
+    return edges.sort_values("edge_probability_pct", ascending=False)[[c for c in cols if c in edges.columns]].head(top_n)
+
+
 def _render_html(
     summary: dict[str, Any],
     attribution: pd.DataFrame,
     kozyrev_top: pd.DataFrame,
+    ultrametric_node_top: pd.DataFrame,
+    ultrametric_edge_top: pd.DataFrame,
     fault_top: pd.DataFrame,
     receiver_top: pd.DataFrame,
     route_top: pd.DataFrame,
     geo_modes: pd.DataFrame,
+    ultrametric_nodes: pd.DataFrame,
+    ultrametric_edges: pd.DataFrame,
     mask: GeoMask,
 ) -> str:
     return f"""<!doctype html>
@@ -239,11 +294,16 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 <h1>TSD-Suelo Results</h1>
 <p class="note">Mascara: {html.escape(str(summary.get("mask_name", "")))}. Reporte autonomo generado desde parquets locales.</p>
 {_summary_grid(summary)}
-<h2>Mapa Estatico</h2>
-{_svg_map(geo_modes, receiver_top, mask)}
+<h2>Mapa De Calor Kozyrev</h2>
+<p class="note">Color por probabilidad empirica observada compatible. Azul bajo, amarillo medio, rojo alto. Los GeoJSON/parquets contienen todos los nodos y aristas.</p>
+{_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
 <h2>Candidatos De Falla</h2>
 <p class="note">Lineamientos observados por concentracion de modos residuales y saltos Kozyrev. No son nombres oficiales de fallas.</p>
 {_table_html(fault_top)}
+<h2>Nodos Ultrametricos Kozyrev</h2>
+{_table_html(ultrametric_node_top)}
+<h2>Aristas Ultrametricas Kozyrev</h2>
+{_table_html(ultrametric_edge_top)}
 <h2>Top Kozyrev</h2>
 {_table_html(kozyrev_top)}
 <h2>Top Receptores</h2>
@@ -265,6 +325,8 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         "events": "Eventos",
         "route_edges": "Aristas ruta",
         "kozyrev_nodes": "Nodos Kozyrev",
+        "ultrametric_nodes": "Nodos ultra",
+        "ultrametric_edges": "Aristas ultra",
         "fault_candidates": "Candidatos falla",
         "compatible_dynamics": "Dinamica compatible",
         "forward_profiles": "Perfiles forward",
@@ -335,3 +397,93 @@ def _svg_map(geo_modes: pd.DataFrame, receiver_top: pd.DataFrame, mask: GeoMask)
             receiver_points.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='{r:.1f}' fill='#be4b38' fill-opacity='0.75'><title>{label}</title></circle>")
 
     return f"<svg viewBox='0 0 {width} {height}' role='img'>{''.join(mask_paths)}{''.join(route_lines)}{''.join(receiver_points)}</svg>"
+
+
+def _probability_color(probability_pct: float) -> str:
+    p = min(max(float(probability_pct) if np.isfinite(probability_pct) else 0.0, 0.0), 100.0) / 100.0
+    if p <= 0.5:
+        t = p / 0.5
+        start = np.array([44, 123, 182], dtype=float)
+        end = np.array([255, 255, 191], dtype=float)
+    else:
+        t = (p - 0.5) / 0.5
+        start = np.array([255, 255, 191], dtype=float)
+        end = np.array([215, 25, 28], dtype=float)
+    rgb = np.round(start + t * (end - start)).astype(int)
+    return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
+
+
+def _svg_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask: GeoMask) -> str:
+    if nodes.empty:
+        return "<p class='note'>Sin grafo ultrametrico probabilistico. Regenera el build.</p>"
+    min_lon, min_lat, max_lon, max_lat = mask.bounds
+    pad_lon = (max_lon - min_lon) * 0.08
+    pad_lat = (max_lat - min_lat) * 0.04
+    min_lon -= pad_lon
+    max_lon += pad_lon
+    min_lat -= pad_lat
+    max_lat += pad_lat
+    width, height = 760, 760
+
+    def project(lon: float, lat: float) -> tuple[float, float]:
+        x = (lon - min_lon) / (max_lon - min_lon) * width
+        y = height - (lat - min_lat) / (max_lat - min_lat) * height
+        return x, y
+
+    mask_paths = []
+    for polygon in mask.polygons:
+        coords = [project(lon, lat) for lon, lat in polygon]
+        d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in coords) + " Z"
+        mask_paths.append(f"<path d='{d}' fill='#eef4ef' stroke='#315f50' stroke-width='1.3'/>")
+
+    levels = pd.to_numeric(nodes.get("level"), errors="coerce") if "level" in nodes else pd.Series(dtype=float)
+    max_level = int(levels.max()) if levels.notna().any() else 4
+    node_type = nodes.get("node_type", pd.Series("", index=nodes.index)).astype(str)
+    route_nodes = nodes[(node_type == "route") & (pd.to_numeric(nodes.get("level"), errors="coerce") == max_level)].copy()
+    route_lines = []
+    required = ["line_start_longitude_deg", "line_start_latitude_deg", "line_end_longitude_deg", "line_end_latitude_deg"]
+    if set(required).issubset(route_nodes.columns):
+        for row in route_nodes.itertuples(index=False):
+            values = [getattr(row, column) for column in required]
+            if not all(np.isfinite(values)):
+                continue
+            p = float(getattr(row, "failure_probability_pct", 0.0))
+            x1, y1 = project(values[0], values[1])
+            x2, y2 = project(values[2], values[3])
+            color = _probability_color(p)
+            opacity = 0.10 + 0.70 * min(max(p, 0.0), 100.0) / 100.0
+            width_px = 0.45 + 2.4 * min(max(p, 0.0), 100.0) / 100.0
+            title = html.escape(f"{getattr(row, 'node_id', '')} | {p:.1f}%")
+            route_lines.append(
+                f"<line x1='{x1:.1f}' y1='{y1:.1f}' x2='{x2:.1f}' y2='{y2:.1f}' "
+                f"stroke='{color}' stroke-opacity='{opacity:.3f}' stroke-width='{width_px:.2f}'><title>{title}</title></line>"
+            )
+
+    point_nodes = nodes[
+        node_type.isin(["source3d", "receiver"])
+        & (pd.to_numeric(nodes.get("level"), errors="coerce") == max_level)
+    ].copy()
+    points = []
+    for row in point_nodes.itertuples(index=False):
+        lon = getattr(row, "centroid_longitude_deg", np.nan)
+        lat = getattr(row, "centroid_latitude_deg", np.nan)
+        if not np.isfinite(lon) or not np.isfinite(lat):
+            continue
+        p = float(getattr(row, "failure_probability_pct", 0.0))
+        x, y = project(lon, lat)
+        color = _probability_color(p)
+        radius = 1.8 + 5.5 * min(max(p, 0.0), 100.0) / 100.0
+        title = html.escape(f"{getattr(row, 'node_id', '')} | {p:.1f}%")
+        points.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='{radius:.1f}' fill='{color}' fill-opacity='0.75'><title>{title}</title></circle>")
+
+    legend = (
+        "<g transform='translate(24,24)'>"
+        "<rect x='0' y='0' width='214' height='54' fill='white' fill-opacity='0.86' stroke='#cfd8df'/>"
+        "<text x='10' y='18' font-size='12' fill='#1d252c'>Probabilidad Kozyrev (%)</text>"
+        "<rect x='10' y='28' width='55' height='12' fill='rgb(44,123,182)'/>"
+        "<rect x='65' y='28' width='55' height='12' fill='rgb(255,255,191)'/>"
+        "<rect x='120' y='28' width='55' height='12' fill='rgb(215,25,28)'/>"
+        "<text x='10' y='50' font-size='10'>0</text><text x='89' y='50' font-size='10'>50</text><text x='158' y='50' font-size='10'>100</text>"
+        "</g>"
+    )
+    return f"<svg viewBox='0 0 {width} {height}' role='img'>{''.join(mask_paths)}{''.join(route_lines)}{''.join(points)}{legend}</svg>"

@@ -96,6 +96,9 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert (out / "latent_modes.parquet").exists()
     assert (out / "fault_candidates.parquet").exists()
     assert (out / "fault_candidates.geojson").exists()
+    assert (out / "kozyrev_ultrametric_nodes.parquet").exists()
+    assert (out / "kozyrev_ultrametric_edges.parquet").exists()
+    assert (out / "kozyrev_heatmap.geojson").exists()
     assert (out / "compatible_dynamics.parquet").exists()
     assert (out / "forward_conditioning_profiles.parquet").exists()
     assert (out / "atlas_geologico.geojson").exists()
@@ -104,7 +107,11 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert set(geo["observed_source"]) == {"h5", "flatfile"}
     assert (out / "results_report.html").exists()
     faults = pd.read_parquet(out / "fault_candidates.parquet")
-    assert {"candidate_id", "fault_candidate_score", "strike_deg"}.issubset(faults.columns)
+    assert {"candidate_id", "fault_candidate_score", "fault_probability_pct", "strike_deg"}.issubset(faults.columns)
+    nodes = pd.read_parquet(out / "kozyrev_ultrametric_nodes.parquet")
+    assert {"node_id", "failure_probability_pct", "probability_basis"}.issubset(nodes.columns)
+    edges = pd.read_parquet(out / "kozyrev_ultrametric_edges.parquet")
+    assert {"from_node", "to_node", "edge_probability_pct", "edge_family"}.issubset(edges.columns)
     compatible = pd.read_parquet(out / "compatible_dynamics.parquet")
     assert {"dynamic_anomaly_score", "forward_support_weight", "compatible_dynamics_status"}.issubset(compatible.columns)
     profiles = pd.read_parquet(out / "forward_conditioning_profiles.parquet")
@@ -125,4 +132,5 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert reused["rows"]["geo_targets_observed"] == manifest["rows"]["geo_targets_observed"]
     assert reused["rows"]["geo_residuals"] == manifest["rows"]["geo_residuals"]
     assert reused["rows"]["fault_candidates"] == manifest["rows"]["fault_candidates"]
+    assert reused["rows"]["kozyrev_ultrametric_nodes"] == manifest["rows"]["kozyrev_ultrametric_nodes"]
     assert reused["rows"]["compatible_dynamics"] == manifest["rows"]["compatible_dynamics"]

@@ -182,6 +182,12 @@ latent_modes.parquet
 latent_mode_components.csv
 route_graph_observed.parquet
 kozyrev_graph_fields.parquet
+kozyrev_ultrametric_nodes.parquet
+kozyrev_ultrametric_edges.parquet
+kozyrev_ultrametric_nodes.geojson
+kozyrev_ultrametric_edges.geojson
+kozyrev_heatmap.geojson
+kozyrev_heatmap.kmz
 fault_candidates.parquet
 top_fault_candidates.csv
 fault_candidates.geojson
@@ -204,7 +210,7 @@ top_route_anomalies.csv
 
 ## Identificar Fallas Candidatas
 
-La corrida no asigna nombres oficiales de fallas. Produce lineamientos candidatos observados desde los registros, despues de residualizar por fuente/distancia/sitio conocido. Revisa primero:
+La corrida no asigna nombres oficiales de fallas. Produce una grilla/grafo ultrametrico Kozyrev completo y lineamientos candidatos observados desde los registros, despues de residualizar por fuente/distancia/sitio conocido. Revisa primero:
 
 ```bash
 tsd-suelo summary --output-dir outputs_precomputed --top-n 20
@@ -213,13 +219,27 @@ tsd-suelo summary --output-dir outputs_precomputed --top-n 20
 Productos principales:
 
 ```text
+kozyrev_ultrametric_nodes.parquet
+kozyrev_ultrametric_edges.parquet
+kozyrev_heatmap.geojson
+kozyrev_heatmap.kmz
 fault_candidates.parquet
-top_fault_candidates.csv
 fault_candidates.geojson
 fault_candidates.kmz
 ```
 
-`fault_candidate_score` prioriza rutas donde coinciden modos residuales altos, saltos Kozyrev, PGA/Arias y repeticion de registros. Abre `fault_candidates.geojson` o `fault_candidates.kmz` en QGIS/Google Earth y cruza esos lineamientos con cartografia de fallas oficial si necesitas nombres geologicos.
+Cada nodo ultrametrico (`source3d`, `route`, `receiver`) queda como nodo del grafo y cada relacion padre-hijo ultrametrica queda como arista. Las aristas fuente-ruta-receptor tambien se escriben en `kozyrev_ultrametric_edges.parquet`.
+
+Los campos principales son:
+
+```text
+failure_probability_pct
+edge_probability_pct
+fault_probability_pct
+probability_basis
+```
+
+Los porcentajes son probabilidades empiricas relativas observadas, calculadas desde percentiles de salto Kozyrev, norma modal y soporte de registros. No son probabilidades absolutas calibradas con fallas catalogadas. Abre `kozyrev_heatmap.geojson` o `kozyrev_heatmap.kmz` en QGIS/Google Earth para ver el mapa de calor completo, no solo los top 50. Cruza esas capas con cartografia de fallas oficial si necesitas nombres geologicos.
 
 ## Dinamica Compatible Para Forward
 

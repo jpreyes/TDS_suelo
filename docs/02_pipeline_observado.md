@@ -117,6 +117,7 @@ receptores
 fuentes
 rutas
 campos Kozyrev de mayor delta
+grilla ultrametrica probabilistica
 candidatos de falla observados
 ```
 
@@ -134,6 +135,31 @@ top_receiver_anomalies.csv
 top_route_anomalies.csv
 top_fault_candidates.csv
 ```
+
+## Grafo Ultrametrico Kozyrev
+
+El build escribe la grilla Kozyrev completa como grafo:
+
+```text
+kozyrev_ultrametric_nodes.parquet
+kozyrev_ultrametric_edges.parquet
+kozyrev_ultrametric_nodes.geojson
+kozyrev_ultrametric_edges.geojson
+kozyrev_heatmap.geojson
+kozyrev_heatmap.kmz
+```
+
+Cada celda `source3d`, `route` y `receiver` en los niveles `j1..j4` es un nodo. Cada relacion padre-hijo entre niveles es una arista `ultrametric_parent_child`. Las relaciones fuente-ruta-receptor tambien quedan en la misma tabla como `source_route_receiver`.
+
+Campos de lectura directa:
+
+```text
+failure_probability_pct
+edge_probability_pct
+probability_basis
+```
+
+Los porcentajes son probabilidad empirica relativa observada, no probabilidad absoluta calibrada contra un catalogo oficial de fallas. Para el mapa de calor completo, abrir `kozyrev_heatmap.geojson` o `kozyrev_heatmap.kmz`.
 
 ## Fallas Candidatas
 

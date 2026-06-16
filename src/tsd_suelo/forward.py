@@ -176,6 +176,7 @@ def _merge_fault_candidates(out: pd.DataFrame, fault_candidates: pd.DataFrame) -
         "candidate_id",
         "route_id",
         "fault_candidate_score",
+        "fault_probability_pct",
         "confidence",
         "strike_deg",
         "n_records",
@@ -238,6 +239,8 @@ def build_compatible_dynamics(
     for column in ("mode_norm", "route_kozyrev_delta_norm", "fault_candidate_score"):
         if column not in out.columns:
             out[column] = np.nan
+    if "fault_probability_pct" not in out.columns:
+        out["fault_probability_pct"] = np.nan
     out["dynamic_anomaly_score"] = (
         0.45 * _rank01(out["mode_norm"])
         + 0.35 * _rank01(out["route_kozyrev_delta_norm"])
@@ -346,6 +349,7 @@ def _forward_schema(targets: list[str], compatible: pd.DataFrame, profiles: pd.D
                 for column in [
                     "fault_candidate_id",
                     "fault_candidate_score",
+                    "fault_probability_pct",
                     "fault_candidate_confidence",
                     "fault_strike_deg",
                 ]
