@@ -29,6 +29,7 @@ def _base_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--workers", type=int, default=1, help="Procesos paralelos para leer H5.")
         cmd.add_argument("--skip-psa", action="store_true", help="Omite PSA desde H5 para primera corrida rapida.")
         cmd.add_argument("--reuse-targets", action="store_true", help="Reusa output waveform_targets_observed.parquet si existe.")
+        cmd.add_argument("--reuse-products", action="store_true", help="Reusa todos los parquets intermedios existentes.")
         cmd.add_argument("--log-file", type=Path, default=None, help="Archivo de log. Por defecto outputs/run.log.")
         cmd.add_argument("--progress-every", type=int, default=500, help="Reporta progreso H5 cada N archivos.")
         cmd.add_argument("--quiet", action="store_true", help="Escribe log sin imprimir progreso en pantalla.")
@@ -47,7 +48,8 @@ def _config_from_args(args: argparse.Namespace) -> PipelineConfig:
         mask_geojson=args.mask_geojson,
         workers=args.workers,
         compute_psa=not args.skip_psa,
-        reuse_targets=args.reuse_targets,
+        reuse_targets=args.reuse_targets or args.reuse_products,
+        reuse_products=args.reuse_products,
         log_file=args.log_file,
         progress_every=args.progress_every,
         quiet=args.quiet,

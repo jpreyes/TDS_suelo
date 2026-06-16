@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,22 @@ def _log(log: LogFn | None, message: str) -> None:
         log(message)
 
 
+def _all_exist(paths: list[Path]) -> bool:
+    return all(path.exists() for path in paths)
+
+
+def _read_parquet(path: Path):
+    import pandas as pd
+
+    return pd.read_parquet(path)
+
+
+def _read_csv(path: Path):
+    import pandas as pd
+
+    return pd.read_csv(path)
+
+
 def run_inventory(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any]:
     cfg = config.resolved()
     ensure_dir(cfg.output_dir)
@@ -37,6 +54,25 @@ def run_targets(config: PipelineConfig, log: LogFn | None = None):
     ensure_dir(cfg.output_dir)
     target_path = cfg.output_dir / "waveform_targets_observed.parquet"
     if cfg.reuse_targets and target_path.exists():
+        meta_path = cfg.output_dir / "waveform_targets_observed.meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if cfg.max_h5 is None and meta.get("max_h5") is not None:
+                raise ValueError(
+                    "No se reutilizan targets parciales para una corrida completa. "
+                    f"Meta max_h5={meta.get('max_h5')} en {meta_path}. "
+                    "Usa un output-dir completo o repite con el mismo --max-h5."
+                )
+            if cfg.max_h5 is not None and meta.get("max_h5") not in (None, cfg.max_h5):
+                raise ValueError(
+                    "El max_h5 solicitado no coincide con los targets existentes. "
+                    f"Solicitado={cfg.max_h5}, meta={meta.get('max_h5')}."
+                )
+            if cfg.compute_psa and meta.get("compute_psa") is False:
+                raise ValueError(
+                    "Los targets existentes fueron calculados con --skip-psa. "
+                    "Para reutilizarlos usa tambien --skip-psa o recalcula sin --reuse-targets."
+                )
         _log(log, f"Reusando targets H5 existentes: {target_path}")
         import pandas as pd
 
@@ -75,7 +111,8 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
             "Config "
             f"records={cfg.records_dir} flatfiles={cfg.flatfiles_dir} "
             f"workers={cfg.workers} compute_psa={cfg.compute_psa} "
-            f"reuse_targets={cfg.reuse_targets} progress_every={cfg.progress_every}",
+            f"reuse_targets={cfg.reuse_targets} reuse_products={cfg.reuse_products} "
+            f"progress_every={cfg.progress_every}",
         )
 
         with PhaseTimer(log, "F00 inventario observado"):
@@ -94,12 +131,25 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
             _log(log, f"Targets H5 filas={waveform_targets.shape[0]}")
 
         with PhaseTimer(log, "F01-F06 geometria, indices fuente/receptor y geo_targets_observed"):
-            geo_targets, geometry, receivers, sources = build_geo_targets(
-                waveform_targets,
-                cfg.flatfiles_dir,
-                cfg.output_dir,
-                include_flatfile_only=cfg.include_flatfile_only,
-            )
+            geo_paths = [
+                cfg.output_dir / "geo_targets_observed.parquet",
+                cfg.output_dir / "record_geometry.parquet",
+                cfg.output_dir / "receiver_index.parquet",
+                cfg.output_dir / "source3d_index.parquet",
+            ]
+            if cfg.reuse_products and _all_exist(geo_paths):
+                _log(log, "Reusando geo_targets/geometry/indices existentes")
+                geo_targets = _read_parquet(geo_paths[0])
+                geometry = _read_parquet(geo_paths[1])
+                receivers = _read_parquet(geo_paths[2])
+                sources = _read_parquet(geo_paths[3])
+            else:
+                geo_targets, geometry, receivers, sources = build_geo_targets(
+                    waveform_targets,
+                    cfg.flatfiles_dir,
+                    cfg.output_dir,
+                    include_flatfile_only=cfg.include_flatfile_only,
+                )
             _log(
                 log,
                 f"Geo targets={geo_targets.shape[0]} "
@@ -111,8 +161,11 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
             with PhaseTimer(log, "Mascara de Chile"):
                 geo_mask = load_chile_mask(cfg.mask_geojson)
                 write_mask(geo_mask, cfg.output_dir)
-                geo_targets = annotate_geo_targets(geo_targets, geo_mask)
-                write_parquet(geo_targets, cfg.output_dir / "geo_targets_observed.parquet")
+                if {"receiver_in_chile_mask", "route_in_chile_mask"}.issubset(geo_targets.columns):
+                    _log(log, "Mascara ya presente en geo_targets; se conserva")
+                else:
+                    geo_targets = annotate_geo_targets(geo_targets, geo_mask)
+                    write_parquet(geo_targets, cfg.output_dir / "geo_targets_observed.parquet")
                 _log(
                     log,
                     f"Mask={geo_mask.name} "
@@ -121,19 +174,46 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 )
 
         with PhaseTimer(log, "F07 residualizacion por fuente/distancia/sitio conocido"):
-            residuals, attribution = residualize_targets(geo_targets)
-            write_residual_products(residuals, attribution, cfg.output_dir)
+            residual_paths = [
+                cfg.output_dir / "geo_residuals.parquet",
+                cfg.output_dir / "target_level_attribution.csv",
+            ]
+            if cfg.reuse_products and _all_exist(residual_paths):
+                _log(log, "Reusando geo_residuals/target_level_attribution existentes")
+                residuals = _read_parquet(residual_paths[0])
+                attribution = _read_csv(residual_paths[1])
+            else:
+                residuals, attribution = residualize_targets(geo_targets)
+                write_residual_products(residuals, attribution, cfg.output_dir)
             _log(log, f"Residuals filas={residuals.shape[0]} targets={attribution.shape[0]}")
 
         with PhaseTimer(log, "F08 descubrimiento de modos latentes"):
-            modes, components = discover_latent_modes(residuals)
-            write_latent_products(modes, components, cfg.output_dir)
+            latent_paths = [
+                cfg.output_dir / "latent_modes.parquet",
+                cfg.output_dir / "latent_mode_components.csv",
+            ]
+            if cfg.reuse_products and _all_exist(latent_paths):
+                _log(log, "Reusando latent_modes/latent_mode_components existentes")
+                modes = _read_parquet(latent_paths[0])
+                components = _read_csv(latent_paths[1])
+            else:
+                modes, components = discover_latent_modes(residuals)
+                write_latent_products(modes, components, cfg.output_dir)
             _log(log, f"Modes filas={modes.shape[0]} components={components.shape[0]}")
 
         with PhaseTimer(log, "F09 grafo Kozyrev fuente 3D -> ruta -> receptor"):
-            route_graph = build_route_graph(geo_targets, modes)
-            kozyrev_fields = build_kozyrev_fields(geo_targets, modes)
-            write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
+            graph_paths = [
+                cfg.output_dir / "route_graph_observed.parquet",
+                cfg.output_dir / "kozyrev_graph_fields.parquet",
+            ]
+            if cfg.reuse_products and _all_exist(graph_paths):
+                _log(log, "Reusando route_graph/kozyrev_graph_fields existentes")
+                route_graph = _read_parquet(graph_paths[0])
+                kozyrev_fields = _read_parquet(graph_paths[1])
+            else:
+                route_graph = build_route_graph(geo_targets, modes)
+                kozyrev_fields = build_kozyrev_fields(geo_targets, modes)
+                write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
             _log(log, f"Route graph filas={route_graph.shape[0]} Kozyrev fields filas={kozyrev_fields.shape[0]}")
 
         with PhaseTimer(log, "F10 atlas geologico observado"):

@@ -98,3 +98,15 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
     assert set(geo["observed_source"]) == {"h5", "flatfile"}
     assert (out / "results_report.html").exists()
+
+    reused = run_build(
+        PipelineConfig(
+            records_dir=records_dir,
+            flatfiles_dir=flatfiles_dir,
+            output_dir=out,
+            reuse_targets=True,
+            reuse_products=True,
+        )
+    )
+    assert reused["rows"]["geo_targets_observed"] == manifest["rows"]["geo_targets_observed"]
+    assert reused["rows"]["geo_residuals"] == manifest["rows"]["geo_residuals"]

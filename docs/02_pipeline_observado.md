@@ -12,37 +12,42 @@ Para una prueba rapida:
 tsd-suelo build --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs/smoke_real --max-h5 10
 ```
 
-Para muchos H5:
+Para precomputar todos los H5 y todos los parquets reutilizables:
 
 ```bash
 time tsd-suelo build \
   --records-dir ../records \
   --flatfiles-dir ../flatfiles \
-  --output-dir outputs_fast \
+  --output-dir outputs_precomputed \
   --workers 8 \
-  --skip-psa \
   --progress-every 500
 ```
 
-`--skip-psa` omite el calculo oscilador por periodo desde H5. Los PSA RotD50 del flatfile siguen disponibles para registros flatfile. Para retomar:
+Para reutilizar todo despues:
 
 ```bash
-tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_fast --reuse-targets --workers 8 --skip-psa
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --reuse-products --workers 8
 ```
 
 El progreso queda en pantalla y en:
 
 ```text
-outputs_fast/run.log
+outputs_precomputed/run.log
 ```
 
 Monitoreo:
 
 ```bash
-tail -f outputs_fast/run.log
+tail -f outputs_precomputed/run.log
 ```
 
 Cada fase registra inicio, fin, duracion, filas generadas y avance H5 con porcentaje, velocidad y ETA.
+
+Si la corrida se corta despues de `waveform_targets_observed.parquet`, pero antes de terminar todos los productos:
+
+```bash
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --reuse-targets --workers 8
+```
 
 ## Convenciones De Claves
 

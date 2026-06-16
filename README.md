@@ -64,30 +64,42 @@ tsd-suelo build --h5-only --records-dir ../records --flatfiles-dir ../records/fl
 
 ## Corrida Grande Con Muchos H5
 
-Para decenas de miles de H5, no conviene empezar calculando PSA. Primero corre una version rapida con targets energeticos/espectrales y paralelismo:
+Para dejar todo precomputado una vez, incluyendo todos los H5 y PSA, usa una carpeta de salida estable. Puede demorar muchas horas; queda todo en parquets reutilizables:
 
 ```bash
 time tsd-suelo build \
   --records-dir ../records \
   --flatfiles-dir ../flatfiles \
-  --output-dir outputs_fast \
+  --output-dir outputs_precomputed \
   --workers 8 \
-  --skip-psa \
   --progress-every 500
 ```
 
-Si se corta despues de haber calculado `waveform_targets_observed.parquet`, puedes retomar sin releer H5:
+Despues de esa corrida, reutiliza todos los productos sin volver a leer H5 ni recalcular ETL/residuos/modos/grafo:
 
 ```bash
 tsd-suelo build \
   --records-dir ../records \
   --flatfiles-dir ../flatfiles \
-  --output-dir outputs_fast \
-  --reuse-targets \
+  --output-dir outputs_precomputed \
+  --reuse-products \
   --workers 8 \
-  --skip-psa \
   --progress-every 500
 ```
+
+Si se corta despues de haber calculado `waveform_targets_observed.parquet`, pero antes de terminar todo, puedes retomar sin releer H5:
+
+```bash
+tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --output-dir outputs_precomputed \
+  --reuse-targets \
+  --workers 8 \
+  --progress-every 500
+```
+
+Para decenas de miles de H5, si quieres una primera version rapida antes de la corrida completa, agrega `--skip-psa`. Esa version no reemplaza la corrida final con PSA.
 
 Para medir tiempo antes del build completo:
 
@@ -106,13 +118,13 @@ El archivo `outputs_bench/waveform_targets_observed.meta.json` deja registrado `
 El build escribe progreso en pantalla y tambien en:
 
 ```text
-outputs_fast/run.log
+outputs_precomputed/run.log
 ```
 
 Para monitorear desde otra sesion SSH/tmux:
 
 ```bash
-tail -f outputs_fast/run.log
+tail -f outputs_precomputed/run.log
 ```
 
 Para escribir solo al log, sin imprimir en pantalla:
@@ -121,16 +133,15 @@ Para escribir solo al log, sin imprimir en pantalla:
 tsd-suelo build \
   --records-dir ../records \
   --flatfiles-dir ../flatfiles \
-  --output-dir outputs_fast \
+  --output-dir outputs_precomputed \
   --workers 8 \
-  --skip-psa \
   --quiet
 ```
 
 Puedes cambiar el archivo de log:
 
 ```bash
-tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_fast --log-file logs/tsd_suelo.log
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --log-file logs/tsd_suelo.log
 ```
 
 ## Mascara De Chile
@@ -209,13 +220,13 @@ Las pruebas usan H5 y flatfiles sinteticos temporales; no dependen de los datos 
 Resumen en terminal:
 
 ```bash
-tsd-suelo summary --output-dir outputs --top-n 20
+tsd-suelo summary --output-dir outputs_precomputed --top-n 20
 ```
 
 Reporte HTML:
 
 ```bash
-python -m http.server 8000 -d outputs
+python -m http.server 8787 --bind 127.0.0.1 -d outputs_precomputed
 ```
 
 Desde tu maquina local:
