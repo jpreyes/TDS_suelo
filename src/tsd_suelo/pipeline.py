@@ -34,8 +34,21 @@ def run_inventory(config: PipelineConfig, log: LogFn | None = None) -> dict[str,
 def run_targets(config: PipelineConfig, log: LogFn | None = None):
     cfg = config.resolved()
     ensure_dir(cfg.output_dir)
+    target_path = cfg.output_dir / "waveform_targets_observed.parquet"
+    if cfg.reuse_targets and target_path.exists():
+        _log(log, f"Reusando targets H5 existentes: {target_path}")
+        import pandas as pd
+
+        return pd.read_parquet(target_path)
     _log(log, "F05 targets fisicos observados desde H5")
-    return build_waveform_targets(cfg.records_dir, cfg.output_dir, max_h5=cfg.max_h5, damping=cfg.damping)
+    return build_waveform_targets(
+        cfg.records_dir,
+        cfg.output_dir,
+        max_h5=cfg.max_h5,
+        damping=cfg.damping,
+        compute_psa=cfg.compute_psa,
+        workers=cfg.workers,
+    )
 
 
 def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any]:
@@ -100,6 +113,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
         "products": [
             "observed_inventory.json",
             "waveform_targets_observed.parquet",
+            "waveform_targets_observed.meta.json",
             "record_geometry.parquet",
             "receiver_index.parquet",
             "source3d_index.parquet",

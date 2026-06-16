@@ -30,9 +30,35 @@ def build_inventory(records_dir: Path, flatfiles_dir: Path, output_dir: Path, ma
     return inventory
 
 
-def build_waveform_targets(records_dir: Path, output_dir: Path, max_h5: int | None = None, damping: float = 0.05) -> pd.DataFrame:
-    targets = build_h5_targets(records_dir, max_h5=max_h5, damping=damping)
+def build_waveform_targets(
+    records_dir: Path,
+    output_dir: Path,
+    max_h5: int | None = None,
+    damping: float = 0.05,
+    compute_psa: bool = True,
+    workers: int = 1,
+) -> pd.DataFrame:
+    targets = build_h5_targets(
+        records_dir,
+        max_h5=max_h5,
+        damping=damping,
+        compute_psa=compute_psa,
+        workers=workers,
+    )
+    if "record_observed_id" in targets.columns:
+        targets = targets.sort_values("record_observed_id").reset_index(drop=True)
     write_parquet(targets, output_dir / "waveform_targets_observed.parquet")
+    write_json(
+        output_dir / "waveform_targets_observed.meta.json",
+        {
+            "records_dir": str(records_dir),
+            "max_h5": max_h5,
+            "damping": damping,
+            "compute_psa": compute_psa,
+            "workers": workers,
+            "h5_processed": int(targets.shape[0]),
+        },
+    )
     return targets
 
 

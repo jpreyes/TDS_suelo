@@ -62,6 +62,45 @@ tsd-suelo report --output-dir outputs
 tsd-suelo build --h5-only --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs_h5
 ```
 
+## Corrida Grande Con Muchos H5
+
+Para decenas de miles de H5, no conviene empezar calculando PSA. Primero corre una version rapida con targets energeticos/espectrales y paralelismo:
+
+```bash
+time tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --output-dir outputs_fast \
+  --workers 8 \
+  --skip-psa
+```
+
+Si se corta despues de haber calculado `waveform_targets_observed.parquet`, puedes retomar sin releer H5:
+
+```bash
+tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --output-dir outputs_fast \
+  --reuse-targets \
+  --workers 8 \
+  --skip-psa
+```
+
+Para medir tiempo antes del build completo:
+
+```bash
+time tsd-suelo targets \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --output-dir outputs_bench \
+  --max-h5 200 \
+  --workers 8 \
+  --skip-psa
+```
+
+El archivo `outputs_bench/waveform_targets_observed.meta.json` deja registrado `h5_processed`, `workers` y si se calculo PSA.
+
 ## Mascara De Chile
 
 El build aplica una mascara gruesa incorporada de Chile y escribe `outputs/chile_mask.geojson`. Para usar una mascara oficial local:
@@ -156,4 +195,3 @@ ssh -L 8000:localhost:8000 usuario@servidor
 Abre `http://localhost:8000/results_report.html`.
 
 Tambien puedes descargar `outputs/atlas_geologico.geojson` o `outputs/atlas_geologico.kmz` y abrirlos en QGIS/Google Earth.
-

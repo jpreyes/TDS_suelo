@@ -25,6 +25,9 @@ def _base_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--no-chile-mask", action="store_true", help="No aplica la mascara de Chile.")
         cmd.add_argument("--mask-geojson", type=Path, default=None, help="GeoJSON local de mascara de Chile o region de estudio.")
         cmd.add_argument("--top-n", type=int, default=50, help="Cantidad de filas en reportes/resumen.")
+        cmd.add_argument("--workers", type=int, default=1, help="Procesos paralelos para leer H5.")
+        cmd.add_argument("--skip-psa", action="store_true", help="Omite PSA desde H5 para primera corrida rapida.")
+        cmd.add_argument("--reuse-targets", action="store_true", help="Reusa output waveform_targets_observed.parquet si existe.")
     return parser
 
 
@@ -38,6 +41,9 @@ def _config_from_args(args: argparse.Namespace) -> PipelineConfig:
         include_flatfile_only=not args.h5_only,
         use_chile_mask=not args.no_chile_mask,
         mask_geojson=args.mask_geojson,
+        workers=args.workers,
+        compute_psa=not args.skip_psa,
+        reuse_targets=args.reuse_targets,
     )
 
 

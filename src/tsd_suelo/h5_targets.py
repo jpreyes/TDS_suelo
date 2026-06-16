@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from typing import Any
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import h5py
 import numpy as np
@@ -167,6 +168,10 @@ def pseudo_spectral_acceleration_g(
 
 
 def read_h5_observation(path: Path, damping: float = 0.05) -> dict[str, Any]:
+    return _read_h5_observation(path, damping=damping, compute_psa=True)
+
+
+def _read_h5_observation(path: Path, damping: float = 0.05, compute_psa: bool = True) -> dict[str, Any]:
     event_from_name, station_from_name = _parse_filename(path)
     with h5py.File(path, "r") as h5:
         record_id_h5 = as_clean_str(_metadata_scalar(h5, "record", "RecordID"))
@@ -222,7 +227,11 @@ def read_h5_observation(path: Path, damping: float = 0.05) -> dict[str, Any]:
     row["east_to_north_pga"] = finite_or_nan(row["pga_e_g"] / row["pga_n_g"]) if row["pga_n_g"] else math.nan
     row["polarization_angle_deg"] = _polarization_angle_deg(e_acc, n_acc)
     row.update(_spectral_metrics(h_acc, dt))
-    row.update(pseudo_spectral_acceleration_g(h_acc, dt, damping=damping))
+    if compute_psa:
+        row.update(pseudo_spectral_acceleration_g(h_acc, dt, damping=damping))
+    else:
+        for period in DEFAULT_PERIODS_S:
+            row[f"psa_t{str(period).replace('.', 'p')}_g"] = math.nan
     return row
 
 
@@ -234,6 +243,30 @@ def _parse_filename(path: Path) -> tuple[str, str]:
     return event_id, station_id
 
 
-def build_h5_targets(records_dir: Path, max_h5: int | None = None, damping: float = 0.05) -> pd.DataFrame:
-    rows = [read_h5_observation(path, damping=damping) for path in list_h5_files(records_dir, max_h5=max_h5)]
+def _read_h5_worker(args: tuple[str, float, bool]) -> dict[str, Any]:
+    path, damping, compute_psa = args
+    return _read_h5_observation(Path(path), damping=damping, compute_psa=compute_psa)
+
+
+def build_h5_targets(
+    records_dir: Path,
+    max_h5: int | None = None,
+    damping: float = 0.05,
+    compute_psa: bool = True,
+    workers: int = 1,
+    progress_every: int = 500,
+) -> pd.DataFrame:
+    files = list_h5_files(records_dir, max_h5=max_h5)
+    if workers <= 1 or len(files) <= 1:
+        rows = [_read_h5_observation(path, damping=damping, compute_psa=compute_psa) for path in files]
+        return pd.DataFrame(rows)
+
+    rows: list[dict[str, Any]] = []
+    tasks = [(str(path), damping, compute_psa) for path in files]
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_read_h5_worker, task) for task in tasks]
+        for index, future in enumerate(as_completed(futures), start=1):
+            rows.append(future.result())
+            if progress_every and index % progress_every == 0:
+                print(f"H5 procesados: {index}/{len(files)}", flush=True)
     return pd.DataFrame(rows)

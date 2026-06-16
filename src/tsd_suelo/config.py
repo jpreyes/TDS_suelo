@@ -21,6 +21,9 @@ class PipelineConfig:
     include_flatfile_only: bool = True
     use_chile_mask: bool = True
     mask_geojson: Path | None = None
+    workers: int = 1
+    compute_psa: bool = True
+    reuse_targets: bool = False
 
     def resolved(self) -> "PipelineConfig":
         return PipelineConfig(
@@ -33,4 +36,7 @@ class PipelineConfig:
             include_flatfile_only=self.include_flatfile_only,
             use_chile_mask=self.use_chile_mask,
             mask_geojson=self.mask_geojson.expanduser().resolve() if self.mask_geojson else None,
+            workers=max(1, int(self.workers)),
+            compute_psa=self.compute_psa,
+            reuse_targets=self.reuse_targets,
         )

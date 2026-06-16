@@ -12,6 +12,23 @@ Para una prueba rapida:
 tsd-suelo build --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs/smoke_real --max-h5 10
 ```
 
+Para muchos H5:
+
+```bash
+time tsd-suelo build \
+  --records-dir ../records \
+  --flatfiles-dir ../flatfiles \
+  --output-dir outputs_fast \
+  --workers 8 \
+  --skip-psa
+```
+
+`--skip-psa` omite el calculo oscilador por periodo desde H5. Los PSA RotD50 del flatfile siguen disponibles para registros flatfile. Para retomar:
+
+```bash
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_fast --reuse-targets --workers 8 --skip-psa
+```
+
 ## Convenciones De Claves
 
 La clave canonica `event_id` sale del nombre del H5:
