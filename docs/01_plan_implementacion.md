@@ -27,6 +27,7 @@ Las rutas de datos son argumentos de CLI y pueden estar fuera del repo.
 | F07 | Residualizacion | `geo_residuals.parquet`, `target_level_attribution.csv` |
 | F08 | Modos latentes | `latent_modes.parquet`, `latent_mode_components.csv` |
 | F09 | Kozyrev/grafo | `kozyrev_graph_fields.parquet` |
+| F09b | Fallas candidatas observadas | `fault_candidates.parquet`, `fault_candidates.geojson` |
 | F10 | Atlas | `atlas_geologico.geojson`, `atlas_geologico.kmz` |
 | F11 | Reporte operativo | `results_report.html`, `top_*_anomalies.csv` |
 

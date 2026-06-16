@@ -27,6 +27,7 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     modes = _read_optional_parquet(output_dir / "latent_modes.parquet")
     kozyrev = _read_optional_parquet(output_dir / "kozyrev_graph_fields.parquet")
     route_graph = _read_optional_parquet(output_dir / "route_graph_observed.parquet")
+    faults = _read_optional_parquet(output_dir / "fault_candidates.parquet")
     attribution = _read_optional_csv(output_dir / "target_level_attribution.csv")
     mask = load_chile_mask(mask_geojson if mask_geojson else _maybe_existing_mask(output_dir))
 
@@ -35,10 +36,12 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     kozyrev_top = _top_kozyrev(kozyrev, top_n)
     receiver_top = _top_receivers(geo_modes, top_n)
     route_top = _top_routes(route_graph, top_n)
+    fault_top = _top_faults(faults, top_n)
 
     kozyrev_top.to_csv(output_dir / "top_kozyrev_anomalies.csv", index=False)
     receiver_top.to_csv(output_dir / "top_receiver_anomalies.csv", index=False)
     route_top.to_csv(output_dir / "top_route_anomalies.csv", index=False)
+    fault_top.to_csv(output_dir / "top_fault_candidates.csv", index=False)
 
     summary = {
         "geo_targets": int(geo.shape[0]),
@@ -48,6 +51,7 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         "events": int(geo["event_id"].nunique()) if "event_id" in geo else 0,
         "route_edges": int(route_graph.shape[0]),
         "kozyrev_nodes": int(kozyrev.shape[0]),
+        "fault_candidates": int(faults.shape[0]),
         "mask_name": mask.name,
         "receiver_in_chile_mask": int(geo.get("receiver_in_chile_mask", pd.Series(dtype=bool)).fillna(False).sum()),
         "route_in_chile_mask": int(geo.get("route_in_chile_mask", pd.Series(dtype=bool)).fillna(False).sum()),
@@ -57,6 +61,7 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         summary=summary,
         attribution=attribution.head(top_n),
         kozyrev_top=kozyrev_top,
+        fault_top=fault_top,
         receiver_top=receiver_top,
         route_top=route_top,
         geo_modes=geo_modes,
@@ -73,6 +78,7 @@ def print_summary(output_dir: Path, top_n: int = 10) -> str:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
     kozyrev = _read_optional_csv(output_dir / "top_kozyrev_anomalies.csv").head(top_n)
+    faults = _read_optional_csv(output_dir / "top_fault_candidates.csv").head(top_n)
     receivers = _read_optional_csv(output_dir / "top_receiver_anomalies.csv").head(top_n)
 
     lines = ["Resumen TSD-Suelo", ""]
@@ -93,6 +99,16 @@ def print_summary(output_dir: Path, top_n: int = 10) -> str:
         lines.extend(["", "Top Kozyrev:"])
         for row in kozyrev.itertuples(index=False):
             lines.append(f"- {getattr(row, 'node_id', '')}: delta={getattr(row, 'kozyrev_delta_norm', np.nan):.3f}, n={getattr(row, 'n_records', 0)}")
+    if not faults.empty:
+        lines.extend(["", "Top candidatos de falla:"])
+        for row in faults.itertuples(index=False):
+            lines.append(
+                "- "
+                f"{getattr(row, 'candidate_id', '')}: "
+                f"score={getattr(row, 'fault_candidate_score', np.nan):.3f}, "
+                f"strike={getattr(row, 'strike_deg', np.nan):.1f}, "
+                f"n={getattr(row, 'n_records', 0)}"
+            )
     if not receivers.empty:
         lines.extend(["", "Top receptores:"])
         for row in receivers.itertuples(index=False):
@@ -165,10 +181,33 @@ def _top_routes(route_graph: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return route_graph.sort_values(score, ascending=False)[[c for c in cols if c in route_graph.columns]].head(top_n)
 
 
+def _top_faults(faults: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if faults.empty:
+        return pd.DataFrame()
+    score = "fault_candidate_score" if "fault_candidate_score" in faults.columns else "n_records"
+    cols = [
+        "candidate_id",
+        "priority_rank",
+        "confidence",
+        "route_id",
+        "n_records",
+        "strike_deg",
+        "midpoint_latitude_deg",
+        "midpoint_longitude_deg",
+        "mode_anomaly_p90",
+        "kozyrev_delta_norm",
+        "pga_h_g_mean",
+        score,
+        "interpretation",
+    ]
+    return faults.sort_values(score, ascending=False)[[c for c in cols if c in faults.columns]].head(top_n)
+
+
 def _render_html(
     summary: dict[str, Any],
     attribution: pd.DataFrame,
     kozyrev_top: pd.DataFrame,
+    fault_top: pd.DataFrame,
     receiver_top: pd.DataFrame,
     route_top: pd.DataFrame,
     geo_modes: pd.DataFrame,
@@ -198,6 +237,9 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 {_summary_grid(summary)}
 <h2>Mapa Estatico</h2>
 {_svg_map(geo_modes, receiver_top, mask)}
+<h2>Candidatos De Falla</h2>
+<p class="note">Lineamientos observados por concentracion de modos residuales y saltos Kozyrev. No son nombres oficiales de fallas.</p>
+{_table_html(fault_top)}
 <h2>Top Kozyrev</h2>
 {_table_html(kozyrev_top)}
 <h2>Top Receptores</h2>
@@ -219,6 +261,7 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         "events": "Eventos",
         "route_edges": "Aristas ruta",
         "kozyrev_nodes": "Nodos Kozyrev",
+        "fault_candidates": "Candidatos falla",
         "receiver_in_chile_mask": "Receptores en mascara",
     }
     cards = []

@@ -94,11 +94,15 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert (out / "geo_targets_observed.parquet").exists()
     assert (out / "geo_residuals.parquet").exists()
     assert (out / "latent_modes.parquet").exists()
+    assert (out / "fault_candidates.parquet").exists()
+    assert (out / "fault_candidates.geojson").exists()
     assert (out / "atlas_geologico.geojson").exists()
     geo = pd.read_parquet(out / "geo_targets_observed.parquet")
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
     assert set(geo["observed_source"]) == {"h5", "flatfile"}
     assert (out / "results_report.html").exists()
+    faults = pd.read_parquet(out / "fault_candidates.parquet")
+    assert {"candidate_id", "fault_candidate_score", "strike_deg"}.issubset(faults.columns)
     assert (out / "waveform_targets_errors.csv").exists()
     meta = pd.read_json(out / "waveform_targets_observed.meta.json", typ="series")
     assert int(meta["h5_errors"]) == 1
@@ -114,3 +118,4 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     )
     assert reused["rows"]["geo_targets_observed"] == manifest["rows"]["geo_targets_observed"]
     assert reused["rows"]["geo_residuals"] == manifest["rows"]["geo_residuals"]
+    assert reused["rows"]["fault_candidates"] == manifest["rows"]["fault_candidates"]

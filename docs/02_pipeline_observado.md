@@ -117,6 +117,7 @@ receptores
 fuentes
 rutas
 campos Kozyrev de mayor delta
+candidatos de falla observados
 ```
 
 `atlas_geologico.kmz` contiene la misma informacion en formato KML comprimido para inspeccion rapida.
@@ -131,7 +132,20 @@ results_summary.json
 top_kozyrev_anomalies.csv
 top_receiver_anomalies.csv
 top_route_anomalies.csv
+top_fault_candidates.csv
 ```
+
+## Fallas Candidatas
+
+El pipeline identifica lineamientos candidatos, no fallas oficiales nombradas. La capa se escribe en:
+
+```text
+fault_candidates.parquet
+fault_candidates.geojson
+fault_candidates.kmz
+```
+
+Cada candidato representa un corredor fuente-ruta-receptor con concentracion de modos residuales, salto Kozyrev y repeticion de registros. Para interpretacion geologica final, cruzar esta capa con trazas oficiales de fallas y mapas geologicos en QGIS.
 
 Para ver por SSH:
 

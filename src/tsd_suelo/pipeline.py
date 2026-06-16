@@ -8,6 +8,7 @@ from typing import Any
 from .atlas import write_atlas_products
 from .config import PipelineConfig
 from .etl import build_geo_targets, build_inventory, build_waveform_targets
+from .faults import build_fault_candidates, fault_candidate_features, write_fault_products
 from .forward import write_forward_template
 from .graph import build_kozyrev_fields, build_route_graph, write_graph_products
 from .latent import discover_latent_modes, write_latent_products
@@ -216,8 +217,30 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 write_graph_products(route_graph, kozyrev_fields, cfg.output_dir)
             _log(log, f"Route graph filas={route_graph.shape[0]} Kozyrev fields filas={kozyrev_fields.shape[0]}")
 
+        with PhaseTimer(log, "F09b candidatos de falla observados"):
+            fault_paths = [
+                cfg.output_dir / "fault_candidates.parquet",
+                cfg.output_dir / "top_fault_candidates.csv",
+                cfg.output_dir / "fault_candidates.geojson",
+                cfg.output_dir / "fault_candidates.kmz",
+            ]
+            if cfg.reuse_products and _all_exist(fault_paths):
+                _log(log, "Reusando fault_candidates existentes")
+                fault_candidates = _read_parquet(fault_paths[0])
+            else:
+                fault_candidates = build_fault_candidates(geo_targets, modes, kozyrev_fields)
+                write_fault_products(fault_candidates, cfg.output_dir)
+            _log(log, f"Fault candidates filas={fault_candidates.shape[0]}")
+
         with PhaseTimer(log, "F10 atlas geologico observado"):
-            write_atlas_products(geo_targets, modes, kozyrev_fields, cfg.output_dir, geo_mask=geo_mask)
+            write_atlas_products(
+                geo_targets,
+                modes,
+                kozyrev_fields,
+                cfg.output_dir,
+                geo_mask=geo_mask,
+                extra_features=fault_candidate_features(fault_candidates.head(200)),
+            )
 
         with PhaseTimer(log, "Contrato de forward condicionado posterior"):
             write_forward_template(geo_targets, modes, cfg.output_dir)
@@ -240,6 +263,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "latent_modes": int(modes.shape[0]),
                 "route_graph_observed": int(route_graph.shape[0]),
                 "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
+                "fault_candidates": int(fault_candidates.shape[0]),
             },
             "products": [
                 "run.log",
@@ -257,6 +281,10 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "latent_mode_components.csv",
                 "route_graph_observed.parquet",
                 "kozyrev_graph_fields.parquet",
+                "fault_candidates.parquet",
+                "top_fault_candidates.csv",
+                "fault_candidates.geojson",
+                "fault_candidates.kmz",
                 "atlas_geologico.geojson",
                 "atlas_geologico.kmz",
                 "chile_mask.geojson",

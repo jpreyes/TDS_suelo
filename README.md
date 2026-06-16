@@ -182,6 +182,10 @@ latent_modes.parquet
 latent_mode_components.csv
 route_graph_observed.parquet
 kozyrev_graph_fields.parquet
+fault_candidates.parquet
+top_fault_candidates.csv
+fault_candidates.geojson
+fault_candidates.kmz
 atlas_geologico.geojson
 atlas_geologico.kmz
 chile_mask.geojson
@@ -195,6 +199,25 @@ top_route_anomalies.csv
 ```
 
 `outputs/` esta ignorado por git porque son artefactos reproducibles.
+
+## Identificar Fallas Candidatas
+
+La corrida no asigna nombres oficiales de fallas. Produce lineamientos candidatos observados desde los registros, despues de residualizar por fuente/distancia/sitio conocido. Revisa primero:
+
+```bash
+tsd-suelo summary --output-dir outputs_precomputed --top-n 20
+```
+
+Productos principales:
+
+```text
+fault_candidates.parquet
+top_fault_candidates.csv
+fault_candidates.geojson
+fault_candidates.kmz
+```
+
+`fault_candidate_score` prioriza rutas donde coinciden modos residuales altos, saltos Kozyrev, PGA/Arias y repeticion de registros. Abre `fault_candidates.geojson` o `fault_candidates.kmz` en QGIS/Google Earth y cruza esos lineamientos con cartografia de fallas oficial si necesitas nombres geologicos.
 
 ## Flujo Implementado
 

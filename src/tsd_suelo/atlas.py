@@ -236,7 +236,10 @@ def write_atlas_products(
     kozyrev_fields: pd.DataFrame,
     output_dir: Path,
     geo_mask: GeoMask | None = None,
+    extra_features: list[dict[str, Any]] | None = None,
 ) -> None:
     features = build_atlas_features(geo_targets, modes, kozyrev_fields, geo_mask=geo_mask)
+    if extra_features:
+        features.extend(extra_features)
     write_geojson(features, output_dir / "atlas_geologico.geojson")
     write_kmz(features, output_dir / "atlas_geologico.kmz")
