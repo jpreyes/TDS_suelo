@@ -36,7 +36,7 @@ def _html_page(title: str, body: str) -> bytes:
 <style>
 body {{ font-family: Arial, sans-serif; margin: 24px; color: #1d252c; }}
 label {{ display: block; margin: 10px 0 4px; font-weight: 600; }}
-input[type=text], input[type=password], input[type=number] {{ width: min(760px, 100%); padding: 7px; }}
+input[type=text], input[type=password], input[type=number], select {{ width: min(760px, 100%); padding: 7px; }}
 button {{ margin: 10px 8px 10px 0; padding: 8px 12px; border: 1px solid #8796a5; background: #f5f8fa; border-radius: 4px; cursor: pointer; }}
 button.danger {{ border-color: #b33; color: #8d1f1f; }}
 pre {{ white-space: pre-wrap; background: #111827; color: #e5e7eb; padding: 12px; max-height: 460px; overflow: auto; }}
@@ -137,6 +137,9 @@ def _build_command(form: dict[str, str], defaults: PipelineConfig) -> list[str]:
         "--progress-every",
         progress_every,
     ]
+    analysis_mode = form.get("analysis_mode") or defaults.analysis_mode
+    if analysis_mode in {"spatial", "spectral", "both"}:
+        command.extend(["--analysis-mode", analysis_mode])
     if _truthy(form.get("reuse_products")):
         command.append("--reuse-products")
     if _truthy(form.get("skip_psa")):
@@ -283,6 +286,12 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
 <input type="number" name="workers" min="1" value="{defaults.workers}">
 <label>progress-every</label>
 <input type="number" name="progress_every" min="1" value="{defaults.progress_every}">
+<label>analysis-mode</label>
+<select name="analysis_mode">
+  <option value="both" {'selected' if defaults.analysis_mode == 'both' else ''}>both: espacial + espectral</option>
+  <option value="spatial" {'selected' if defaults.analysis_mode == 'spatial' else ''}>spatial: grilla espacial</option>
+  <option value="spectral" {'selected' if defaults.analysis_mode == 'spectral' else ''}>spectral: red dinamica en frecuencia</option>
+</select>
 <p>
 <label><input type="checkbox" name="reuse_products" checked> Reusar productos existentes</label>
 <label><input type="checkbox" name="skip_psa"> Omitir PSA</label>

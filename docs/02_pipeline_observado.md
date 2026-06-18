@@ -169,6 +169,39 @@ persistencia entre niveles = mayor confianza cualitativa
 
 Los parquets contienen todos los niveles. Los GeoJSON/KMZ usan el nivel de visualizacion mas fino con vecindad suficiente para QGIS/Google Earth.
 
+## Red Dinamica Espectral Equivalente
+
+El modo `spectral` construye una red dinamica equivalente en frecuencia. Cada H5 se transforma a una firma espectral horizontal sobre una grilla comun de frecuencias, y todas las frecuencias se ajustan simultaneamente como vector:
+
+```text
+spectral_record_signatures.parquet
+spectral_node_dynamics.parquet
+spectral_edge_transmissibility.parquet
+spectral_dynamic_modes.parquet
+spectral_mode_components.csv
+spectral_dynamic_heatmap.geojson
+spectral_dynamic_heatmap.kmz
+spectral_frequency_grid.json
+```
+
+Campos principales:
+
+```text
+spectral_dynamic_probability_pct
+spectral_transfer_probability_pct
+spectral_jump_norm
+transfer_log_f000 ... transfer_log_f063
+```
+
+La tabla `spectral_edge_transmissibility.parquet` representa la transferencia log-espectral entre nodos vecinos. Es la base inicial para forward espectral compatible sin FEM/BEM.
+
+Uso:
+
+```bash
+tsd-suelo build --analysis-mode spectral --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --reuse-products
+tsd-suelo build --analysis-mode both --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --reuse-products
+```
+
 ## Grafo Ultrametrico Kozyrev
 
 El build conserva el grafo Kozyrev fuente-ruta-receptor como referencia, pero ya no es la capa principal para detectar fallas espaciales:

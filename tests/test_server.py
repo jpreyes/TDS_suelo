@@ -22,6 +22,7 @@ def test_build_command_uses_configured_external_paths(tmp_path: Path) -> None:
             "workers": "8",
             "progress_every": "500",
             "reuse_products": "on",
+            "analysis_mode": "spectral",
         },
         cfg,
     )
@@ -30,4 +31,5 @@ def test_build_command_uses_configured_external_paths(tmp_path: Path) -> None:
     assert command[command.index("--flatfiles-dir") + 1] == "../flatfiles"
     assert command[command.index("--output-dir") + 1] == "outputs_precomputed"
     assert command[command.index("--workers") + 1] == "8"
+    assert command[command.index("--analysis-mode") + 1] == "spectral"
     assert "--reuse-products" in command

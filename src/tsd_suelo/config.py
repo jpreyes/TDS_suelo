@@ -25,6 +25,7 @@ class PipelineConfig:
     compute_psa: bool = True
     reuse_targets: bool = False
     reuse_products: bool = False
+    analysis_mode: str = "both"
     log_file: Path | None = None
     progress_every: int = 500
     quiet: bool = False
@@ -44,6 +45,7 @@ class PipelineConfig:
             compute_psa=self.compute_psa,
             reuse_targets=self.reuse_targets,
             reuse_products=self.reuse_products,
+            analysis_mode=self.analysis_mode if self.analysis_mode in {"spatial", "spectral", "both"} else "both",
             log_file=self.log_file.expanduser().resolve() if self.log_file else None,
             progress_every=max(1, int(self.progress_every)),
             quiet=self.quiet,

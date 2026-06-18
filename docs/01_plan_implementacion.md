@@ -27,6 +27,7 @@ Las rutas de datos son argumentos de CLI y pueden estar fuera del repo.
 | F07 | Residualizacion | `geo_residuals.parquet`, `target_level_attribution.csv` |
 | F08 | Modos latentes | `latent_modes.parquet`, `latent_mode_components.csv` |
 | F08b | Grilla espacial jerarquica | `spatial_grid_nodes.parquet`, `spatial_grid_edges.parquet`, `spatial_probability_heatmap.geojson` |
+| F08c | Red dinamica espectral equivalente | `spectral_node_dynamics.parquet`, `spectral_edge_transmissibility.parquet`, `spectral_dynamic_heatmap.geojson` |
 | F09 | Kozyrev/grafo | `kozyrev_graph_fields.parquet` |
 | F09a | Grilla/grafo ultrametrico probabilistico | `kozyrev_ultrametric_nodes.parquet`, `kozyrev_ultrametric_edges.parquet`, `kozyrev_heatmap.geojson` |
 | F09b | Fallas candidatas observadas | `fault_candidates.parquet`, `fault_candidates.geojson` |

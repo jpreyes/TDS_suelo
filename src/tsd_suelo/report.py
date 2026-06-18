@@ -29,6 +29,9 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     route_graph = _read_optional_parquet(output_dir / "route_graph_observed.parquet")
     spatial_nodes = _read_optional_parquet(output_dir / "spatial_grid_nodes.parquet")
     spatial_edges = _read_optional_parquet(output_dir / "spatial_grid_edges.parquet")
+    spectral_nodes = _read_optional_parquet(output_dir / "spectral_node_dynamics.parquet")
+    spectral_edges = _read_optional_parquet(output_dir / "spectral_edge_transmissibility.parquet")
+    spectral_modes = _read_optional_parquet(output_dir / "spectral_dynamic_modes.parquet")
     ultrametric_nodes = _read_optional_parquet(output_dir / "kozyrev_ultrametric_nodes.parquet")
     ultrametric_edges = _read_optional_parquet(output_dir / "kozyrev_ultrametric_edges.parquet")
     faults = _read_optional_parquet(output_dir / "fault_candidates.parquet")
@@ -44,6 +47,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     route_top = _top_routes(route_graph, top_n)
     spatial_node_top = _top_spatial_nodes(spatial_nodes, top_n)
     spatial_edge_top = _top_spatial_edges(spatial_edges, top_n)
+    spectral_node_top = _top_spectral_nodes(spectral_nodes, top_n)
+    spectral_edge_top = _top_spectral_edges(spectral_edges, top_n)
     fault_top = _top_faults(faults, top_n)
     ultrametric_node_top = _top_ultrametric_nodes(ultrametric_nodes, top_n)
     ultrametric_edge_top = _top_ultrametric_edges(ultrametric_edges, top_n)
@@ -62,6 +67,9 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         "route_edges": int(route_graph.shape[0]),
         "spatial_grid_nodes": int(spatial_nodes.shape[0]),
         "spatial_grid_edges": int(spatial_edges.shape[0]),
+        "spectral_node_dynamics": int(spectral_nodes.shape[0]),
+        "spectral_edge_transmissibility": int(spectral_edges.shape[0]),
+        "spectral_dynamic_modes": int(spectral_modes.shape[0]),
         "kozyrev_nodes": int(kozyrev.shape[0]),
         "ultrametric_nodes": int(ultrametric_nodes.shape[0]),
         "ultrametric_edges": int(ultrametric_edges.shape[0]),
@@ -80,6 +88,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         kozyrev_top=kozyrev_top,
         spatial_node_top=spatial_node_top,
         spatial_edge_top=spatial_edge_top,
+        spectral_node_top=spectral_node_top,
+        spectral_edge_top=spectral_edge_top,
         ultrametric_node_top=ultrametric_node_top,
         ultrametric_edge_top=ultrametric_edge_top,
         fault_top=fault_top,
@@ -88,6 +98,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         geo_modes=geo_modes,
         spatial_nodes=spatial_nodes,
         spatial_edges=spatial_edges,
+        spectral_nodes=spectral_nodes,
+        spectral_edges=spectral_edges,
         ultrametric_nodes=ultrametric_nodes,
         ultrametric_edges=ultrametric_edges,
         mask=mask,
@@ -120,6 +132,8 @@ def print_summary(output_dir: Path, top_n: int = 10) -> str:
                 f"Rutas dentro mascara Chile: {summary.get('route_in_chile_mask', 0)}",
                 f"Nodos grilla espacial: {summary.get('spatial_grid_nodes', 0)}",
                 f"Aristas grilla espacial: {summary.get('spatial_grid_edges', 0)}",
+                f"Nodos dinamica espectral: {summary.get('spectral_node_dynamics', 0)}",
+                f"Aristas dinamica espectral: {summary.get('spectral_edge_transmissibility', 0)}",
                 f"Nodos ultrametricos Kozyrev: {summary.get('ultrametric_nodes', 0)}",
                 f"Aristas ultrametricas Kozyrev: {summary.get('ultrametric_edges', 0)}",
             ]
@@ -252,6 +266,45 @@ def _top_spatial_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return edges.sort_values("fault_probability_pct", ascending=False)[[c for c in cols if c in edges.columns]].head(top_n)
 
 
+def _top_spectral_nodes(nodes: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if nodes.empty or "spectral_dynamic_probability_pct" not in nodes.columns:
+        return pd.DataFrame()
+    cols = [
+        "level",
+        "cell_id",
+        "n_records",
+        "n_stations",
+        "n_events",
+        "center_latitude_deg",
+        "center_longitude_deg",
+        "spectral_dynamic_probability_pct",
+        "spectral_shape_probability_pct",
+        "spectral_energy_probability_pct",
+        "support_probability_pct",
+    ]
+    return nodes.sort_values("spectral_dynamic_probability_pct", ascending=False)[[c for c in cols if c in nodes.columns]].head(top_n)
+
+
+def _top_spectral_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if edges.empty or "spectral_transfer_probability_pct" not in edges.columns:
+        return pd.DataFrame()
+    cols = [
+        "level",
+        "from_cell_id",
+        "to_cell_id",
+        "neighbor_orientation",
+        "neighbor_kind",
+        "min_n_records",
+        "spectral_jump_norm",
+        "spectral_transfer_log_mean",
+        "spectral_transfer_log_std",
+        "spectral_transfer_probability_pct",
+        "spectral_jump_probability_pct",
+        "support_probability_pct",
+    ]
+    return edges.sort_values("spectral_transfer_probability_pct", ascending=False)[[c for c in cols if c in edges.columns]].head(top_n)
+
+
 def _top_faults(faults: pd.DataFrame, top_n: int) -> pd.DataFrame:
     if faults.empty:
         return pd.DataFrame()
@@ -319,6 +372,8 @@ def _render_html(
     kozyrev_top: pd.DataFrame,
     spatial_node_top: pd.DataFrame,
     spatial_edge_top: pd.DataFrame,
+    spectral_node_top: pd.DataFrame,
+    spectral_edge_top: pd.DataFrame,
     ultrametric_node_top: pd.DataFrame,
     ultrametric_edge_top: pd.DataFrame,
     fault_top: pd.DataFrame,
@@ -327,6 +382,8 @@ def _render_html(
     geo_modes: pd.DataFrame,
     spatial_nodes: pd.DataFrame,
     spatial_edges: pd.DataFrame,
+    spectral_nodes: pd.DataFrame,
+    spectral_edges: pd.DataFrame,
     ultrametric_nodes: pd.DataFrame,
     ultrametric_edges: pd.DataFrame,
     mask: GeoMask,
@@ -358,6 +415,9 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 <h2>Mapa De Calor Espacial</h2>
 <p class="note">Celdas rectangulares por probabilidad de anomalia y aristas vecinas por probabilidad de falla. Azul bajo, amarillo medio, rojo alto. Los parquets contienen todos los niveles.</p>
 {_svg_spatial_probability_map(spatial_nodes, spatial_edges, mask)}
+<h2>Mapa Dinamico Espectral</h2>
+<p class="note">Red estructural equivalente en frecuencia: celdas por dinamica espectral y aristas por salto/transmisibilidad usando todas las frecuencias de la grilla espectral simultaneamente.</p>
+{_svg_spectral_probability_map(spectral_nodes, spectral_edges, mask)}
 <h2>Candidatos De Falla</h2>
 <p class="note">Lineamientos observados por concentracion de modos residuales y saltos Kozyrev. No son nombres oficiales de fallas.</p>
 {_table_html(fault_top)}
@@ -365,6 +425,10 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 {_table_html(spatial_node_top)}
 <h2>Aristas Espaciales Con Salto</h2>
 {_table_html(spatial_edge_top)}
+<h2>Nodos Dinamicos Espectrales</h2>
+{_table_html(spectral_node_top)}
+<h2>Aristas De Transmisibilidad Espectral</h2>
+{_table_html(spectral_edge_top)}
 <h2>Mapa Kozyrev Anterior</h2>
 <p class="note">Referencia del grafo fuente-ruta-receptor anterior. El detector espacial es la capa principal para patrones de falla.</p>
 {_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
@@ -394,6 +458,9 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         "route_edges": "Aristas ruta",
         "spatial_grid_nodes": "Celdas espaciales",
         "spatial_grid_edges": "Aristas espaciales",
+        "spectral_node_dynamics": "Nodos espectrales",
+        "spectral_edge_transmissibility": "Aristas espectrales",
+        "spectral_dynamic_modes": "Modos espectrales",
         "kozyrev_nodes": "Nodos Kozyrev",
         "ultrametric_nodes": "Nodos ultra",
         "ultrametric_edges": "Aristas ultra",
@@ -425,6 +492,14 @@ def _download_links(output_dir: Path) -> str:
         ("Celdas espaciales parquet", "spatial_grid_nodes.parquet"),
         ("Aristas espaciales parquet", "spatial_grid_edges.parquet"),
         ("Resumen grilla espacial JSON", "spatial_grid_summary.json"),
+        ("Mapa dinamico espectral GeoJSON", "spectral_dynamic_heatmap.geojson"),
+        ("Mapa dinamico espectral KMZ", "spectral_dynamic_heatmap.kmz"),
+        ("Firmas espectrales por registro parquet", "spectral_record_signatures.parquet"),
+        ("Nodos dinamicos espectrales parquet", "spectral_node_dynamics.parquet"),
+        ("Aristas transmisibilidad espectral parquet", "spectral_edge_transmissibility.parquet"),
+        ("Modos dinamicos espectrales parquet", "spectral_dynamic_modes.parquet"),
+        ("Componentes modos espectrales CSV", "spectral_mode_components.csv"),
+        ("Grilla frecuencias espectral JSON", "spectral_frequency_grid.json"),
         ("Mapa calor Kozyrev GeoJSON", "kozyrev_heatmap.geojson"),
         ("Mapa calor Kozyrev KMZ", "kozyrev_heatmap.kmz"),
         ("Nodos ultrametricos GeoJSON", "kozyrev_ultrametric_nodes.geojson"),
@@ -610,6 +685,87 @@ def _svg_spatial_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask:
         "<rect x='0' y='0' width='258' height='70' fill='white' fill-opacity='0.88' stroke='#cfd8df'/>"
         f"<text x='10' y='18' font-size='12' fill='#1d252c'>Grilla espacial nivel J{display_level}</text>"
         "<text x='10' y='35' font-size='10' fill='#53606d'>celdas=anomalia, lineas=falla</text>"
+        "<rect x='10' y='44' width='55' height='12' fill='rgb(44,123,182)'/>"
+        "<rect x='65' y='44' width='55' height='12' fill='rgb(255,255,191)'/>"
+        "<rect x='120' y='44' width='55' height='12' fill='rgb(215,25,28)'/>"
+        "<text x='10' y='66' font-size='10'>0</text><text x='89' y='66' font-size='10'>50</text><text x='158' y='66' font-size='10'>100</text>"
+        "</g>"
+    )
+    return f"<svg viewBox='0 0 {width} {height}' role='img'>{''.join(mask_paths)}{''.join(cells)}{''.join(edge_lines)}{legend}</svg>"
+
+
+def _svg_spectral_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask: GeoMask) -> str:
+    if nodes.empty:
+        return "<p class='note'>Sin red dinamica espectral. Ejecuta build con analysis-mode=spectral o both.</p>"
+    display_level = _spatial_display_level(nodes, edges)
+    if display_level is None:
+        return "<p class='note'>Sin nivel espectral disponible.</p>"
+
+    min_lon, min_lat, max_lon, max_lat = mask.bounds
+    pad_lon = (max_lon - min_lon) * 0.08
+    pad_lat = (max_lat - min_lat) * 0.04
+    min_lon -= pad_lon
+    max_lon += pad_lon
+    min_lat -= pad_lat
+    max_lat += pad_lat
+    width, height = 760, 760
+
+    def project(lon: float, lat: float) -> tuple[float, float]:
+        x = (lon - min_lon) / (max_lon - min_lon) * width
+        y = height - (lat - min_lat) / (max_lat - min_lat) * height
+        return x, y
+
+    mask_paths = []
+    for polygon in mask.polygons:
+        coords = [project(lon, lat) for lon, lat in polygon]
+        d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in coords) + " Z"
+        mask_paths.append(f"<path d='{d}' fill='#eef4ef' stroke='#315f50' stroke-width='1.3'/>")
+
+    node_layer = nodes[pd.to_numeric(nodes.get("level"), errors="coerce") == display_level].copy()
+    edge_layer = edges[pd.to_numeric(edges.get("level"), errors="coerce") == display_level].copy() if not edges.empty else pd.DataFrame()
+
+    cells = []
+    required = ["lon_min_deg", "lat_min_deg", "lon_max_deg", "lat_max_deg"]
+    if set(required).issubset(node_layer.columns):
+        for row in node_layer.itertuples(index=False):
+            values = [getattr(row, column) for column in required]
+            if not all(np.isfinite(values)):
+                continue
+            p = float(getattr(row, "spectral_dynamic_probability_pct", 0.0))
+            x1, y1 = project(values[0], values[1])
+            x2, y2 = project(values[2], values[3])
+            color = _probability_color(p)
+            opacity = 0.10 + 0.55 * min(max(p, 0.0), 100.0) / 100.0
+            title = html.escape(f"{getattr(row, 'cell_id', '')} | dinamica espectral {p:.1f}% | n={getattr(row, 'n_records', 0)}")
+            cells.append(
+                f"<rect x='{min(x1, x2):.1f}' y='{min(y1, y2):.1f}' width='{max(abs(x2-x1), 0.6):.2f}' height='{max(abs(y2-y1), 0.6):.2f}' "
+                f"fill='{color}' fill-opacity='{opacity:.3f}' stroke='none'><title>{title}</title></rect>"
+            )
+
+    edge_lines = []
+    edge_required = ["from_longitude_deg", "from_latitude_deg", "to_longitude_deg", "to_latitude_deg"]
+    if not edge_layer.empty and set(edge_required).issubset(edge_layer.columns):
+        for row in edge_layer.itertuples(index=False):
+            values = [getattr(row, column) for column in edge_required]
+            if not all(np.isfinite(values)):
+                continue
+            p = float(getattr(row, "spectral_transfer_probability_pct", 0.0))
+            x1, y1 = project(values[0], values[1])
+            x2, y2 = project(values[2], values[3])
+            color = _probability_color(p)
+            opacity = 0.18 + 0.74 * min(max(p, 0.0), 100.0) / 100.0
+            width_px = 0.35 + 2.7 * min(max(p, 0.0), 100.0) / 100.0
+            title = html.escape(f"{getattr(row, 'from_cell_id', '')} -> {getattr(row, 'to_cell_id', '')} | transferencia {p:.1f}%")
+            edge_lines.append(
+                f"<line x1='{x1:.1f}' y1='{y1:.1f}' x2='{x2:.1f}' y2='{y2:.1f}' "
+                f"stroke='{color}' stroke-opacity='{opacity:.3f}' stroke-width='{width_px:.2f}'><title>{title}</title></line>"
+            )
+
+    legend = (
+        "<g transform='translate(24,24)'>"
+        "<rect x='0' y='0' width='286' height='70' fill='white' fill-opacity='0.88' stroke='#cfd8df'/>"
+        f"<text x='10' y='18' font-size='12' fill='#1d252c'>Red espectral nivel J{display_level}</text>"
+        "<text x='10' y='35' font-size='10' fill='#53606d'>celdas=respuesta, lineas=transmisibilidad</text>"
         "<rect x='10' y='44' width='55' height='12' fill='rgb(44,123,182)'/>"
         "<rect x='65' y='44' width='55' height='12' fill='rgb(255,255,191)'/>"
         "<rect x='120' y='44' width='55' height='12' fill='rgb(215,25,28)'/>"

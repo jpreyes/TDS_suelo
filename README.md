@@ -87,6 +87,21 @@ tsd-suelo build \
   --progress-every 500
 ```
 
+Puedes elegir el modo de analisis:
+
+```bash
+# Solo grilla espacial de anomalias/fallas
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --analysis-mode spatial --reuse-products
+
+# Solo red dinamica espectral equivalente
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --analysis-mode spectral --reuse-products
+
+# Ambos modos
+tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-dir outputs_precomputed --analysis-mode both --reuse-products
+```
+
+El modo `spectral` reabre los H5 la primera vez para construir firmas espectrales completas en una grilla de frecuencias comun; despues queda reutilizable como parquet.
+
 Si se corta despues de haber calculado `waveform_targets_observed.parquet`, pero antes de terminar todo, puedes retomar sin releer H5:
 
 ```bash
@@ -186,6 +201,14 @@ spatial_anomaly_nodes.geojson
 spatial_fault_edges.geojson
 spatial_probability_heatmap.geojson
 spatial_probability_heatmap.kmz
+spectral_record_signatures.parquet
+spectral_node_dynamics.parquet
+spectral_edge_transmissibility.parquet
+spectral_dynamic_modes.parquet
+spectral_mode_components.csv
+spectral_dynamic_heatmap.geojson
+spectral_dynamic_heatmap.kmz
+spectral_frequency_grid.json
 route_graph_observed.parquet
 kozyrev_graph_fields.parquet
 kozyrev_ultrametric_nodes.parquet
@@ -253,6 +276,34 @@ probability_basis
 ```
 
 Los porcentajes son probabilidades empiricas relativas observadas, calculadas por nivel desde percentiles de norma modal, intensidad, soporte y salto entre vecinos. No son probabilidades absolutas calibradas con fallas catalogadas. Abre `spatial_probability_heatmap.geojson` o `spatial_probability_heatmap.kmz` en QGIS/Google Earth para ver el mapa de calor espacial. Cruza esas capas con cartografia de fallas oficial si necesitas nombres geologicos.
+
+## Red Dinamica Espectral Equivalente
+
+El modo `spectral` implementa la analogia de estructura equivalente: cada celda espacial ocupada es un nodo/sensor, las celdas vecinas son aristas de transferencia y cada registro H5 aporta una firma espectral horizontal sobre una grilla comun de frecuencias. La estimacion usa todas las frecuencias simultaneamente, no bandas independientes.
+
+Productos:
+
+```text
+spectral_record_signatures.parquet
+spectral_node_dynamics.parquet
+spectral_edge_transmissibility.parquet
+spectral_dynamic_modes.parquet
+spectral_mode_components.csv
+spectral_dynamic_heatmap.geojson
+spectral_dynamic_heatmap.kmz
+spectral_frequency_grid.json
+```
+
+Campos principales:
+
+```text
+spectral_dynamic_probability_pct
+spectral_transfer_probability_pct
+spectral_jump_norm
+transfer_log_f000 ... transfer_log_f063
+```
+
+`spectral_edge_transmissibility.parquet` es el operador inicial para forward espectral: cada arista contiene una diferencia log-espectral entre nodos vecinos sobre toda la grilla de frecuencias. No es FEM/BEM; es una red dinamica equivalente calibrada directamente desde los H5.
 
 ## Dinamica Compatible Para Forward
 

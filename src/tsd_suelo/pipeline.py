@@ -17,6 +17,14 @@ from .mask import annotate_geo_targets, load_chile_mask, write_mask
 from .report import build_results_report
 from .residuals import residualize_targets, write_residual_products
 from .spatial_grid import build_spatial_grid_edges, build_spatial_grid_nodes, spatial_grid_features, write_spatial_grid_products
+from .spectral import (
+    build_spectral_edge_transmissibility,
+    build_spectral_modes,
+    build_spectral_node_dynamics,
+    build_spectral_record_signatures,
+    spectral_heatmap_features,
+    write_spectral_products,
+)
 from .ultrametric import build_ultrametric_edges, build_ultrametric_nodes, kozyrev_heatmap_features, write_ultrametric_products
 from .utils import ensure_dir, write_json, write_parquet
 
@@ -43,6 +51,12 @@ def _read_csv(path: Path):
     import pandas as pd
 
     return pd.read_csv(path)
+
+
+def _empty_frame():
+    import pandas as pd
+
+    return pd.DataFrame()
 
 
 def _parquet_has_columns(path: Path, columns: set[str]) -> bool:
@@ -125,7 +139,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
             f"records={cfg.records_dir} flatfiles={cfg.flatfiles_dir} "
             f"workers={cfg.workers} compute_psa={cfg.compute_psa} "
             f"reuse_targets={cfg.reuse_targets} reuse_products={cfg.reuse_products} "
-            f"progress_every={cfg.progress_every}",
+            f"analysis_mode={cfg.analysis_mode} progress_every={cfg.progress_every}",
         )
 
         with PhaseTimer(log, "F00 inventario observado"):
@@ -214,30 +228,93 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 write_latent_products(modes, components, cfg.output_dir)
             _log(log, f"Modes filas={modes.shape[0]} components={components.shape[0]}")
 
-        with PhaseTimer(log, "F08b grilla espacial jerarquica de anomalias"):
-            spatial_paths = [
-                cfg.output_dir / "spatial_grid_nodes.parquet",
-                cfg.output_dir / "spatial_grid_edges.parquet",
-                cfg.output_dir / "spatial_anomaly_nodes.geojson",
-                cfg.output_dir / "spatial_fault_edges.geojson",
-                cfg.output_dir / "spatial_probability_heatmap.geojson",
-                cfg.output_dir / "spatial_probability_heatmap.kmz",
-            ]
-            can_reuse_spatial = (
-                cfg.reuse_products
-                and _all_exist(spatial_paths)
-                and _parquet_has_columns(spatial_paths[0], {"anomaly_probability_pct"})
-                and _parquet_has_columns(spatial_paths[1], {"fault_probability_pct"})
-            )
-            if can_reuse_spatial:
-                _log(log, "Reusando grilla espacial existente")
-                spatial_nodes = _read_parquet(spatial_paths[0])
-                spatial_edges = _read_parquet(spatial_paths[1])
-            else:
-                spatial_nodes = build_spatial_grid_nodes(geo_targets, modes)
-                spatial_edges = build_spatial_grid_edges(spatial_nodes)
-                write_spatial_grid_products(spatial_nodes, spatial_edges, cfg.output_dir)
-            _log(log, f"Spatial grid nodes={spatial_nodes.shape[0]} edges={spatial_edges.shape[0]}")
+        spatial_nodes = _empty_frame()
+        spatial_edges = _empty_frame()
+        if cfg.analysis_mode in {"spatial", "both"}:
+            with PhaseTimer(log, "F08b grilla espacial jerarquica de anomalias"):
+                spatial_paths = [
+                    cfg.output_dir / "spatial_grid_nodes.parquet",
+                    cfg.output_dir / "spatial_grid_edges.parquet",
+                    cfg.output_dir / "spatial_anomaly_nodes.geojson",
+                    cfg.output_dir / "spatial_fault_edges.geojson",
+                    cfg.output_dir / "spatial_probability_heatmap.geojson",
+                    cfg.output_dir / "spatial_probability_heatmap.kmz",
+                ]
+                can_reuse_spatial = (
+                    cfg.reuse_products
+                    and _all_exist(spatial_paths)
+                    and _parquet_has_columns(spatial_paths[0], {"anomaly_probability_pct"})
+                    and _parquet_has_columns(spatial_paths[1], {"fault_probability_pct"})
+                )
+                if can_reuse_spatial:
+                    _log(log, "Reusando grilla espacial existente")
+                    spatial_nodes = _read_parquet(spatial_paths[0])
+                    spatial_edges = _read_parquet(spatial_paths[1])
+                else:
+                    spatial_nodes = build_spatial_grid_nodes(geo_targets, modes)
+                    spatial_edges = build_spatial_grid_edges(spatial_nodes)
+                    write_spatial_grid_products(spatial_nodes, spatial_edges, cfg.output_dir)
+                _log(log, f"Spatial grid nodes={spatial_nodes.shape[0]} edges={spatial_edges.shape[0]}")
+        else:
+            _log(log, "F08b grilla espacial omitida por analysis_mode=spectral")
+
+        spectral_records = _empty_frame()
+        spectral_nodes = _empty_frame()
+        spectral_edges = _empty_frame()
+        spectral_modes = _empty_frame()
+        spectral_components = _empty_frame()
+        if cfg.analysis_mode in {"spectral", "both"}:
+            with PhaseTimer(log, "F08c red dinamica espectral equivalente"):
+                spectral_paths = [
+                    cfg.output_dir / "spectral_record_signatures.parquet",
+                    cfg.output_dir / "spectral_node_dynamics.parquet",
+                    cfg.output_dir / "spectral_edge_transmissibility.parquet",
+                    cfg.output_dir / "spectral_dynamic_modes.parquet",
+                    cfg.output_dir / "spectral_mode_components.csv",
+                    cfg.output_dir / "spectral_dynamic_heatmap.geojson",
+                    cfg.output_dir / "spectral_dynamic_heatmap.kmz",
+                    cfg.output_dir / "spectral_frequency_grid.json",
+                ]
+                can_reuse_spectral = (
+                    cfg.reuse_products
+                    and _all_exist(spectral_paths)
+                    and _parquet_has_columns(spectral_paths[1], {"spectral_dynamic_probability_pct"})
+                    and _parquet_has_columns(spectral_paths[2], {"spectral_transfer_probability_pct"})
+                )
+                if can_reuse_spectral:
+                    _log(log, "Reusando red dinamica espectral existente")
+                    spectral_records = _read_parquet(spectral_paths[0])
+                    spectral_nodes = _read_parquet(spectral_paths[1])
+                    spectral_edges = _read_parquet(spectral_paths[2])
+                    spectral_modes = _read_parquet(spectral_paths[3])
+                    spectral_components = _read_csv(spectral_paths[4])
+                else:
+                    spectral_records = build_spectral_record_signatures(
+                        waveform_targets,
+                        cfg.records_dir,
+                        workers=cfg.workers,
+                        progress_every=cfg.progress_every,
+                        log=log,
+                    )
+                    spectral_nodes = build_spectral_node_dynamics(geo_targets, spectral_records)
+                    spectral_edges = build_spectral_edge_transmissibility(spectral_nodes)
+                    spectral_modes, spectral_components = build_spectral_modes(spectral_nodes)
+                    write_spectral_products(
+                        spectral_records,
+                        spectral_nodes,
+                        spectral_edges,
+                        spectral_modes,
+                        spectral_components,
+                        cfg.output_dir,
+                    )
+                _log(
+                    log,
+                    f"Spectral records={spectral_records.shape[0]} "
+                    f"nodes={spectral_nodes.shape[0]} edges={spectral_edges.shape[0]} "
+                    f"modes={spectral_modes.shape[0]}",
+                )
+        else:
+            _log(log, "F08c red dinamica espectral omitida por analysis_mode=spatial")
 
         with PhaseTimer(log, "F09 grafo Kozyrev fuente 3D -> ruta -> receptor"):
             graph_paths = [
@@ -306,6 +383,7 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 cfg.output_dir,
                 geo_mask=geo_mask,
                 extra_features=spatial_grid_features(spatial_nodes, spatial_edges)
+                + spectral_heatmap_features(spectral_nodes, spectral_edges)
                 + kozyrev_heatmap_features(ultrametric_nodes, ultrametric_edges)
                 + fault_candidate_features(fault_candidates),
             )
@@ -357,6 +435,10 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "latent_modes": int(modes.shape[0]),
                 "spatial_grid_nodes": int(spatial_nodes.shape[0]),
                 "spatial_grid_edges": int(spatial_edges.shape[0]),
+                "spectral_record_signatures": int(spectral_records.shape[0]),
+                "spectral_node_dynamics": int(spectral_nodes.shape[0]),
+                "spectral_edge_transmissibility": int(spectral_edges.shape[0]),
+                "spectral_dynamic_modes": int(spectral_modes.shape[0]),
                 "route_graph_observed": int(route_graph.shape[0]),
                 "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
                 "kozyrev_ultrametric_nodes": int(ultrametric_nodes.shape[0]),
@@ -386,6 +468,14 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "spatial_probability_heatmap.geojson",
                 "spatial_probability_heatmap.kmz",
                 "spatial_grid_summary.json",
+                "spectral_record_signatures.parquet",
+                "spectral_node_dynamics.parquet",
+                "spectral_edge_transmissibility.parquet",
+                "spectral_dynamic_modes.parquet",
+                "spectral_mode_components.csv",
+                "spectral_dynamic_heatmap.geojson",
+                "spectral_dynamic_heatmap.kmz",
+                "spectral_frequency_grid.json",
                 "route_graph_observed.parquet",
                 "kozyrev_graph_fields.parquet",
                 "kozyrev_ultrametric_nodes.parquet",
