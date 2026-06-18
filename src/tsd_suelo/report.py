@@ -609,6 +609,59 @@ def _spatial_display_level(nodes: pd.DataFrame, edges: pd.DataFrame) -> int | No
     return None
 
 
+def _visible_grid_display_level(
+    nodes: pd.DataFrame,
+    edges: pd.DataFrame,
+    bounds: tuple[float, float, float, float],
+    canvas_size: tuple[int, int],
+    *,
+    min_cell_px: float = 3.0,
+    min_edges: int = 3,
+) -> int | None:
+    if nodes.empty or "level" not in nodes.columns:
+        return None
+    required = {"lon_min_deg", "lat_min_deg", "lon_max_deg", "lat_max_deg"}
+    if not required.issubset(nodes.columns):
+        return _spatial_display_level(nodes, edges)
+
+    min_lon, min_lat, max_lon, max_lat = bounds
+    width, height = canvas_size
+    lon_span = max(max_lon - min_lon, 1e-9)
+    lat_span = max(max_lat - min_lat, 1e-9)
+    work = nodes.copy()
+    work["level_numeric"] = pd.to_numeric(work["level"], errors="coerce")
+    lon_min = pd.to_numeric(work["lon_min_deg"], errors="coerce")
+    lon_max = pd.to_numeric(work["lon_max_deg"], errors="coerce")
+    lat_min = pd.to_numeric(work["lat_min_deg"], errors="coerce")
+    lat_max = pd.to_numeric(work["lat_max_deg"], errors="coerce")
+    work["cell_px_w"] = (lon_max - lon_min).abs() / lon_span * width
+    work["cell_px_h"] = (lat_max - lat_min).abs() / lat_span * height
+    work["cell_px_min"] = work[["cell_px_w", "cell_px_h"]].min(axis=1)
+    work = work[np.isfinite(work["level_numeric"]) & np.isfinite(work["cell_px_min"])]
+    if work.empty:
+        return _spatial_display_level(nodes, edges)
+
+    levels = [int(level) for level in sorted(work["level_numeric"].unique(), reverse=True)]
+    edge_counts = (
+        edges.groupby("level").size()
+        if not edges.empty and "level" in edges.columns
+        else pd.Series(dtype=int)
+    )
+    visible_levels = []
+    for level in levels:
+        layer = work[work["level_numeric"] == level]
+        if layer.empty:
+            continue
+        if float(layer["cell_px_min"].median()) < min_cell_px:
+            continue
+        visible_levels.append(level)
+        if int(edge_counts.get(level, 0)) >= min_edges:
+            return level
+    if visible_levels:
+        return visible_levels[0]
+    return _spatial_display_level(nodes, edges)
+
+
 def _svg_spatial_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask: GeoMask) -> str:
     if nodes.empty:
         return "<p class='note'>Sin grilla espacial. Regenera el build.</p>"
@@ -697,10 +750,6 @@ def _svg_spatial_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask:
 def _svg_spectral_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask: GeoMask) -> str:
     if nodes.empty:
         return "<p class='note'>Sin red dinamica espectral. Ejecuta build con analysis-mode=spectral o both.</p>"
-    display_level = _spatial_display_level(nodes, edges)
-    if display_level is None:
-        return "<p class='note'>Sin nivel espectral disponible.</p>"
-
     min_lon, min_lat, max_lon, max_lat = mask.bounds
     pad_lon = (max_lon - min_lon) * 0.08
     pad_lat = (max_lat - min_lat) * 0.04
@@ -709,6 +758,9 @@ def _svg_spectral_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask
     min_lat -= pad_lat
     max_lat += pad_lat
     width, height = 760, 760
+    display_level = _visible_grid_display_level(nodes, edges, (min_lon, min_lat, max_lon, max_lat), (width, height))
+    if display_level is None:
+        return "<p class='note'>Sin nivel espectral disponible.</p>"
 
     def project(lon: float, lat: float) -> tuple[float, float]:
         x = (lon - min_lon) / (max_lon - min_lon) * width
@@ -735,11 +787,12 @@ def _svg_spectral_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask
             x1, y1 = project(values[0], values[1])
             x2, y2 = project(values[2], values[3])
             color = _probability_color(p)
-            opacity = 0.10 + 0.55 * min(max(p, 0.0), 100.0) / 100.0
+            opacity = 0.24 + 0.70 * min(max(p, 0.0), 100.0) / 100.0
             title = html.escape(f"{getattr(row, 'cell_id', '')} | dinamica espectral {p:.1f}% | n={getattr(row, 'n_records', 0)}")
             cells.append(
                 f"<rect x='{min(x1, x2):.1f}' y='{min(y1, y2):.1f}' width='{max(abs(x2-x1), 0.6):.2f}' height='{max(abs(y2-y1), 0.6):.2f}' "
-                f"fill='{color}' fill-opacity='{opacity:.3f}' stroke='none'><title>{title}</title></rect>"
+                f"fill='{color}' fill-opacity='{opacity:.3f}' stroke='#22313c' stroke-opacity='0.34' "
+                f"stroke-width='0.22'><title>{title}</title></rect>"
             )
 
     edge_lines = []
@@ -764,7 +817,7 @@ def _svg_spectral_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask
     legend = (
         "<g transform='translate(24,24)'>"
         "<rect x='0' y='0' width='286' height='70' fill='white' fill-opacity='0.88' stroke='#cfd8df'/>"
-        f"<text x='10' y='18' font-size='12' fill='#1d252c'>Red espectral nivel J{display_level}</text>"
+        f"<text x='10' y='18' font-size='12' fill='#1d252c'>Red espectral nivel J{display_level} auto</text>"
         "<text x='10' y='35' font-size='10' fill='#53606d'>celdas=respuesta, lineas=transmisibilidad</text>"
         "<rect x='10' y='44' width='55' height='12' fill='rgb(44,123,182)'/>"
         "<rect x='65' y='44' width='55' height='12' fill='rgb(255,255,191)'/>"
