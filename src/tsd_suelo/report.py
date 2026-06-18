@@ -27,6 +27,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     modes = _read_optional_parquet(output_dir / "latent_modes.parquet")
     kozyrev = _read_optional_parquet(output_dir / "kozyrev_graph_fields.parquet")
     route_graph = _read_optional_parquet(output_dir / "route_graph_observed.parquet")
+    spatial_nodes = _read_optional_parquet(output_dir / "spatial_grid_nodes.parquet")
+    spatial_edges = _read_optional_parquet(output_dir / "spatial_grid_edges.parquet")
     ultrametric_nodes = _read_optional_parquet(output_dir / "kozyrev_ultrametric_nodes.parquet")
     ultrametric_edges = _read_optional_parquet(output_dir / "kozyrev_ultrametric_edges.parquet")
     faults = _read_optional_parquet(output_dir / "fault_candidates.parquet")
@@ -40,6 +42,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     kozyrev_top = _top_kozyrev(kozyrev, top_n)
     receiver_top = _top_receivers(geo_modes, top_n)
     route_top = _top_routes(route_graph, top_n)
+    spatial_node_top = _top_spatial_nodes(spatial_nodes, top_n)
+    spatial_edge_top = _top_spatial_edges(spatial_edges, top_n)
     fault_top = _top_faults(faults, top_n)
     ultrametric_node_top = _top_ultrametric_nodes(ultrametric_nodes, top_n)
     ultrametric_edge_top = _top_ultrametric_edges(ultrametric_edges, top_n)
@@ -56,6 +60,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         "receivers": int(geo["station_id"].nunique()) if "station_id" in geo else 0,
         "events": int(geo["event_id"].nunique()) if "event_id" in geo else 0,
         "route_edges": int(route_graph.shape[0]),
+        "spatial_grid_nodes": int(spatial_nodes.shape[0]),
+        "spatial_grid_edges": int(spatial_edges.shape[0]),
         "kozyrev_nodes": int(kozyrev.shape[0]),
         "ultrametric_nodes": int(ultrametric_nodes.shape[0]),
         "ultrametric_edges": int(ultrametric_edges.shape[0]),
@@ -72,12 +78,16 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         summary=summary,
         attribution=attribution.head(top_n),
         kozyrev_top=kozyrev_top,
+        spatial_node_top=spatial_node_top,
+        spatial_edge_top=spatial_edge_top,
         ultrametric_node_top=ultrametric_node_top,
         ultrametric_edge_top=ultrametric_edge_top,
         fault_top=fault_top,
         receiver_top=receiver_top,
         route_top=route_top,
         geo_modes=geo_modes,
+        spatial_nodes=spatial_nodes,
+        spatial_edges=spatial_edges,
         ultrametric_nodes=ultrametric_nodes,
         ultrametric_edges=ultrametric_edges,
         mask=mask,
@@ -108,6 +118,8 @@ def print_summary(output_dir: Path, top_n: int = 10) -> str:
                 f"Flatfile-only usados: {summary.get('flatfile_records', 0)}",
                 f"Receptores dentro mascara Chile: {summary.get('receiver_in_chile_mask', 0)}",
                 f"Rutas dentro mascara Chile: {summary.get('route_in_chile_mask', 0)}",
+                f"Nodos grilla espacial: {summary.get('spatial_grid_nodes', 0)}",
+                f"Aristas grilla espacial: {summary.get('spatial_grid_edges', 0)}",
                 f"Nodos ultrametricos Kozyrev: {summary.get('ultrametric_nodes', 0)}",
                 f"Aristas ultrametricas Kozyrev: {summary.get('ultrametric_edges', 0)}",
             ]
@@ -199,6 +211,47 @@ def _top_routes(route_graph: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return route_graph.sort_values(score, ascending=False)[[c for c in cols if c in route_graph.columns]].head(top_n)
 
 
+def _top_spatial_nodes(nodes: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if nodes.empty or "anomaly_probability_pct" not in nodes.columns:
+        return pd.DataFrame()
+    cols = [
+        "level",
+        "cell_id",
+        "n_records",
+        "n_stations",
+        "n_events",
+        "center_latitude_deg",
+        "center_longitude_deg",
+        "sample_role",
+        "mode_norm",
+        "anomaly_probability_pct",
+        "mode_probability_pct",
+        "intensity_probability_pct",
+        "support_probability_pct",
+    ]
+    return nodes.sort_values("anomaly_probability_pct", ascending=False)[[c for c in cols if c in nodes.columns]].head(top_n)
+
+
+def _top_spatial_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if edges.empty or "fault_probability_pct" not in edges.columns:
+        return pd.DataFrame()
+    cols = [
+        "level",
+        "from_cell_id",
+        "to_cell_id",
+        "neighbor_orientation",
+        "neighbor_kind",
+        "min_n_records",
+        "mode_jump_norm",
+        "anomaly_probability_jump_pct",
+        "fault_probability_pct",
+        "mode_jump_probability_pct",
+        "anomaly_jump_probability_pct",
+        "support_probability_pct",
+    ]
+    return edges.sort_values("fault_probability_pct", ascending=False)[[c for c in cols if c in edges.columns]].head(top_n)
+
+
 def _top_faults(faults: pd.DataFrame, top_n: int) -> pd.DataFrame:
     if faults.empty:
         return pd.DataFrame()
@@ -264,12 +317,16 @@ def _render_html(
     summary: dict[str, Any],
     attribution: pd.DataFrame,
     kozyrev_top: pd.DataFrame,
+    spatial_node_top: pd.DataFrame,
+    spatial_edge_top: pd.DataFrame,
     ultrametric_node_top: pd.DataFrame,
     ultrametric_edge_top: pd.DataFrame,
     fault_top: pd.DataFrame,
     receiver_top: pd.DataFrame,
     route_top: pd.DataFrame,
     geo_modes: pd.DataFrame,
+    spatial_nodes: pd.DataFrame,
+    spatial_edges: pd.DataFrame,
     ultrametric_nodes: pd.DataFrame,
     ultrametric_edges: pd.DataFrame,
     mask: GeoMask,
@@ -298,12 +355,19 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 {_summary_grid(summary)}
 <h2>Descargas</h2>
 {_download_links(output_dir)}
-<h2>Mapa De Calor Kozyrev</h2>
-<p class="note">Color por probabilidad empirica observada compatible. Azul bajo, amarillo medio, rojo alto. Los GeoJSON/parquets contienen todos los nodos y aristas.</p>
-{_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
+<h2>Mapa De Calor Espacial</h2>
+<p class="note">Celdas rectangulares por probabilidad de anomalia y aristas vecinas por probabilidad de falla. Azul bajo, amarillo medio, rojo alto. Los parquets contienen todos los niveles.</p>
+{_svg_spatial_probability_map(spatial_nodes, spatial_edges, mask)}
 <h2>Candidatos De Falla</h2>
 <p class="note">Lineamientos observados por concentracion de modos residuales y saltos Kozyrev. No son nombres oficiales de fallas.</p>
 {_table_html(fault_top)}
+<h2>Celdas Espaciales Anomalas</h2>
+{_table_html(spatial_node_top)}
+<h2>Aristas Espaciales Con Salto</h2>
+{_table_html(spatial_edge_top)}
+<h2>Mapa Kozyrev Anterior</h2>
+<p class="note">Referencia del grafo fuente-ruta-receptor anterior. El detector espacial es la capa principal para patrones de falla.</p>
+{_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
 <h2>Nodos Ultrametricos Kozyrev</h2>
 {_table_html(ultrametric_node_top)}
 <h2>Aristas Ultrametricas Kozyrev</h2>
@@ -328,6 +392,8 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         "receivers": "Receptores",
         "events": "Eventos",
         "route_edges": "Aristas ruta",
+        "spatial_grid_nodes": "Celdas espaciales",
+        "spatial_grid_edges": "Aristas espaciales",
         "kozyrev_nodes": "Nodos Kozyrev",
         "ultrametric_nodes": "Nodos ultra",
         "ultrametric_edges": "Aristas ultra",
@@ -352,6 +418,13 @@ def _download_links(output_dir: Path) -> str:
     products = [
         ("Reporte HTML", "results_report.html"),
         ("Resumen JSON", "results_summary.json"),
+        ("Mapa calor espacial GeoJSON", "spatial_probability_heatmap.geojson"),
+        ("Mapa calor espacial KMZ", "spatial_probability_heatmap.kmz"),
+        ("Celdas espaciales GeoJSON", "spatial_anomaly_nodes.geojson"),
+        ("Aristas espaciales GeoJSON", "spatial_fault_edges.geojson"),
+        ("Celdas espaciales parquet", "spatial_grid_nodes.parquet"),
+        ("Aristas espaciales parquet", "spatial_grid_edges.parquet"),
+        ("Resumen grilla espacial JSON", "spatial_grid_summary.json"),
         ("Mapa calor Kozyrev GeoJSON", "kozyrev_heatmap.geojson"),
         ("Mapa calor Kozyrev KMZ", "kozyrev_heatmap.kmz"),
         ("Nodos ultrametricos GeoJSON", "kozyrev_ultrametric_nodes.geojson"),
@@ -444,6 +517,106 @@ def _probability_color(probability_pct: float) -> str:
         end = np.array([215, 25, 28], dtype=float)
     rgb = np.round(start + t * (end - start)).astype(int)
     return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
+
+
+def _spatial_display_level(nodes: pd.DataFrame, edges: pd.DataFrame) -> int | None:
+    if not edges.empty and "level" in edges.columns:
+        counts = edges.groupby("level").size()
+        usable = counts[counts >= 3]
+        if not usable.empty:
+            return int(usable.index.max())
+        if not counts.empty:
+            return int(counts.index.max())
+    if not nodes.empty and "level" in nodes.columns:
+        levels = pd.to_numeric(nodes["level"], errors="coerce").dropna()
+        if not levels.empty:
+            return int(levels.max())
+    return None
+
+
+def _svg_spatial_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask: GeoMask) -> str:
+    if nodes.empty:
+        return "<p class='note'>Sin grilla espacial. Regenera el build.</p>"
+    display_level = _spatial_display_level(nodes, edges)
+    if display_level is None:
+        return "<p class='note'>Sin nivel espacial disponible.</p>"
+
+    min_lon, min_lat, max_lon, max_lat = mask.bounds
+    pad_lon = (max_lon - min_lon) * 0.08
+    pad_lat = (max_lat - min_lat) * 0.04
+    min_lon -= pad_lon
+    max_lon += pad_lon
+    min_lat -= pad_lat
+    max_lat += pad_lat
+    width, height = 760, 760
+
+    def project(lon: float, lat: float) -> tuple[float, float]:
+        x = (lon - min_lon) / (max_lon - min_lon) * width
+        y = height - (lat - min_lat) / (max_lat - min_lat) * height
+        return x, y
+
+    mask_paths = []
+    for polygon in mask.polygons:
+        coords = [project(lon, lat) for lon, lat in polygon]
+        d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in coords) + " Z"
+        mask_paths.append(f"<path d='{d}' fill='#eef4ef' stroke='#315f50' stroke-width='1.3'/>")
+
+    node_layer = nodes[pd.to_numeric(nodes.get("level"), errors="coerce") == display_level].copy()
+    edge_layer = edges[pd.to_numeric(edges.get("level"), errors="coerce") == display_level].copy() if not edges.empty else pd.DataFrame()
+
+    cells = []
+    required = ["lon_min_deg", "lat_min_deg", "lon_max_deg", "lat_max_deg"]
+    if set(required).issubset(node_layer.columns):
+        for row in node_layer.itertuples(index=False):
+            values = [getattr(row, column) for column in required]
+            if not all(np.isfinite(values)):
+                continue
+            p = float(getattr(row, "anomaly_probability_pct", 0.0))
+            x1, y1 = project(values[0], values[1])
+            x2, y2 = project(values[2], values[3])
+            x = min(x1, x2)
+            y = min(y1, y2)
+            cell_w = max(abs(x2 - x1), 0.6)
+            cell_h = max(abs(y2 - y1), 0.6)
+            color = _probability_color(p)
+            opacity = 0.10 + 0.55 * min(max(p, 0.0), 100.0) / 100.0
+            title = html.escape(f"{getattr(row, 'cell_id', '')} | anomalia {p:.1f}% | n={getattr(row, 'n_records', 0)}")
+            cells.append(
+                f"<rect x='{x:.1f}' y='{y:.1f}' width='{cell_w:.2f}' height='{cell_h:.2f}' "
+                f"fill='{color}' fill-opacity='{opacity:.3f}' stroke='none'><title>{title}</title></rect>"
+            )
+
+    edge_lines = []
+    edge_required = ["from_longitude_deg", "from_latitude_deg", "to_longitude_deg", "to_latitude_deg"]
+    if not edge_layer.empty and set(edge_required).issubset(edge_layer.columns):
+        for row in edge_layer.itertuples(index=False):
+            values = [getattr(row, column) for column in edge_required]
+            if not all(np.isfinite(values)):
+                continue
+            p = float(getattr(row, "fault_probability_pct", 0.0))
+            x1, y1 = project(values[0], values[1])
+            x2, y2 = project(values[2], values[3])
+            color = _probability_color(p)
+            opacity = 0.18 + 0.74 * min(max(p, 0.0), 100.0) / 100.0
+            width_px = 0.35 + 2.7 * min(max(p, 0.0), 100.0) / 100.0
+            title = html.escape(f"{getattr(row, 'from_cell_id', '')} -> {getattr(row, 'to_cell_id', '')} | falla {p:.1f}%")
+            edge_lines.append(
+                f"<line x1='{x1:.1f}' y1='{y1:.1f}' x2='{x2:.1f}' y2='{y2:.1f}' "
+                f"stroke='{color}' stroke-opacity='{opacity:.3f}' stroke-width='{width_px:.2f}'><title>{title}</title></line>"
+            )
+
+    legend = (
+        "<g transform='translate(24,24)'>"
+        "<rect x='0' y='0' width='258' height='70' fill='white' fill-opacity='0.88' stroke='#cfd8df'/>"
+        f"<text x='10' y='18' font-size='12' fill='#1d252c'>Grilla espacial nivel J{display_level}</text>"
+        "<text x='10' y='35' font-size='10' fill='#53606d'>celdas=anomalia, lineas=falla</text>"
+        "<rect x='10' y='44' width='55' height='12' fill='rgb(44,123,182)'/>"
+        "<rect x='65' y='44' width='55' height='12' fill='rgb(255,255,191)'/>"
+        "<rect x='120' y='44' width='55' height='12' fill='rgb(215,25,28)'/>"
+        "<text x='10' y='66' font-size='10'>0</text><text x='89' y='66' font-size='10'>50</text><text x='158' y='66' font-size='10'>100</text>"
+        "</g>"
+    )
+    return f"<svg viewBox='0 0 {width} {height}' role='img'>{''.join(mask_paths)}{''.join(cells)}{''.join(edge_lines)}{legend}</svg>"
 
 
 def _svg_probability_map(nodes: pd.DataFrame, edges: pd.DataFrame, mask: GeoMask) -> str:

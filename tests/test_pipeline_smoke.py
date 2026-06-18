@@ -96,6 +96,9 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert (out / "latent_modes.parquet").exists()
     assert (out / "fault_candidates.parquet").exists()
     assert (out / "fault_candidates.geojson").exists()
+    assert (out / "spatial_grid_nodes.parquet").exists()
+    assert (out / "spatial_grid_edges.parquet").exists()
+    assert (out / "spatial_probability_heatmap.geojson").exists()
     assert (out / "kozyrev_ultrametric_nodes.parquet").exists()
     assert (out / "kozyrev_ultrametric_edges.parquet").exists()
     assert (out / "kozyrev_heatmap.geojson").exists()
@@ -106,8 +109,13 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
     assert set(geo["observed_source"]) == {"h5", "flatfile"}
     assert (out / "results_report.html").exists()
+    assert "Mapa De Calor Espacial" in (out / "results_report.html").read_text(encoding="utf-8")
     faults = pd.read_parquet(out / "fault_candidates.parquet")
     assert {"candidate_id", "fault_candidate_score", "fault_probability_pct", "strike_deg"}.issubset(faults.columns)
+    spatial_nodes = pd.read_parquet(out / "spatial_grid_nodes.parquet")
+    assert {"cell_id", "center_latitude_deg", "anomaly_probability_pct", "probability_basis"}.issubset(spatial_nodes.columns)
+    spatial_edges = pd.read_parquet(out / "spatial_grid_edges.parquet")
+    assert {"from_cell_id", "to_cell_id", "fault_probability_pct", "edge_family"}.issubset(spatial_edges.columns)
     nodes = pd.read_parquet(out / "kozyrev_ultrametric_nodes.parquet")
     assert {"node_id", "failure_probability_pct", "probability_basis"}.issubset(nodes.columns)
     edges = pd.read_parquet(out / "kozyrev_ultrametric_edges.parquet")
@@ -131,6 +139,7 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     )
     assert reused["rows"]["geo_targets_observed"] == manifest["rows"]["geo_targets_observed"]
     assert reused["rows"]["geo_residuals"] == manifest["rows"]["geo_residuals"]
+    assert reused["rows"]["spatial_grid_nodes"] == manifest["rows"]["spatial_grid_nodes"]
     assert reused["rows"]["fault_candidates"] == manifest["rows"]["fault_candidates"]
     assert reused["rows"]["kozyrev_ultrametric_nodes"] == manifest["rows"]["kozyrev_ultrametric_nodes"]
     assert reused["rows"]["compatible_dynamics"] == manifest["rows"]["compatible_dynamics"]

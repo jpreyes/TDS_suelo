@@ -16,6 +16,7 @@ from .logging_utils import PhaseTimer, RunLogger, format_seconds
 from .mask import annotate_geo_targets, load_chile_mask, write_mask
 from .report import build_results_report
 from .residuals import residualize_targets, write_residual_products
+from .spatial_grid import build_spatial_grid_edges, build_spatial_grid_nodes, spatial_grid_features, write_spatial_grid_products
 from .ultrametric import build_ultrametric_edges, build_ultrametric_nodes, kozyrev_heatmap_features, write_ultrametric_products
 from .utils import ensure_dir, write_json, write_parquet
 
@@ -213,6 +214,31 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 write_latent_products(modes, components, cfg.output_dir)
             _log(log, f"Modes filas={modes.shape[0]} components={components.shape[0]}")
 
+        with PhaseTimer(log, "F08b grilla espacial jerarquica de anomalias"):
+            spatial_paths = [
+                cfg.output_dir / "spatial_grid_nodes.parquet",
+                cfg.output_dir / "spatial_grid_edges.parquet",
+                cfg.output_dir / "spatial_anomaly_nodes.geojson",
+                cfg.output_dir / "spatial_fault_edges.geojson",
+                cfg.output_dir / "spatial_probability_heatmap.geojson",
+                cfg.output_dir / "spatial_probability_heatmap.kmz",
+            ]
+            can_reuse_spatial = (
+                cfg.reuse_products
+                and _all_exist(spatial_paths)
+                and _parquet_has_columns(spatial_paths[0], {"anomaly_probability_pct"})
+                and _parquet_has_columns(spatial_paths[1], {"fault_probability_pct"})
+            )
+            if can_reuse_spatial:
+                _log(log, "Reusando grilla espacial existente")
+                spatial_nodes = _read_parquet(spatial_paths[0])
+                spatial_edges = _read_parquet(spatial_paths[1])
+            else:
+                spatial_nodes = build_spatial_grid_nodes(geo_targets, modes)
+                spatial_edges = build_spatial_grid_edges(spatial_nodes)
+                write_spatial_grid_products(spatial_nodes, spatial_edges, cfg.output_dir)
+            _log(log, f"Spatial grid nodes={spatial_nodes.shape[0]} edges={spatial_edges.shape[0]}")
+
         with PhaseTimer(log, "F09 grafo Kozyrev fuente 3D -> ruta -> receptor"):
             graph_paths = [
                 cfg.output_dir / "route_graph_observed.parquet",
@@ -279,7 +305,9 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 kozyrev_fields,
                 cfg.output_dir,
                 geo_mask=geo_mask,
-                extra_features=kozyrev_heatmap_features(ultrametric_nodes, ultrametric_edges) + fault_candidate_features(fault_candidates),
+                extra_features=spatial_grid_features(spatial_nodes, spatial_edges)
+                + kozyrev_heatmap_features(ultrametric_nodes, ultrametric_edges)
+                + fault_candidate_features(fault_candidates),
             )
 
         with PhaseTimer(log, "F11 dinamica compatible para forward condicionado"):
@@ -327,6 +355,8 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "geo_targets_observed": int(geo_targets.shape[0]),
                 "geo_residuals": int(residuals.shape[0]),
                 "latent_modes": int(modes.shape[0]),
+                "spatial_grid_nodes": int(spatial_nodes.shape[0]),
+                "spatial_grid_edges": int(spatial_edges.shape[0]),
                 "route_graph_observed": int(route_graph.shape[0]),
                 "kozyrev_graph_fields": int(kozyrev_fields.shape[0]),
                 "kozyrev_ultrametric_nodes": int(ultrametric_nodes.shape[0]),
@@ -349,6 +379,13 @@ def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any
                 "target_level_attribution.csv",
                 "latent_modes.parquet",
                 "latent_mode_components.csv",
+                "spatial_grid_nodes.parquet",
+                "spatial_grid_edges.parquet",
+                "spatial_anomaly_nodes.geojson",
+                "spatial_fault_edges.geojson",
+                "spatial_probability_heatmap.geojson",
+                "spatial_probability_heatmap.kmz",
+                "spatial_grid_summary.json",
                 "route_graph_observed.parquet",
                 "kozyrev_graph_fields.parquet",
                 "kozyrev_ultrametric_nodes.parquet",

@@ -180,6 +180,12 @@ geo_residuals.parquet
 target_level_attribution.csv
 latent_modes.parquet
 latent_mode_components.csv
+spatial_grid_nodes.parquet
+spatial_grid_edges.parquet
+spatial_anomaly_nodes.geojson
+spatial_fault_edges.geojson
+spatial_probability_heatmap.geojson
+spatial_probability_heatmap.kmz
 route_graph_observed.parquet
 kozyrev_graph_fields.parquet
 kozyrev_ultrametric_nodes.parquet
@@ -208,9 +214,9 @@ top_route_anomalies.csv
 
 `outputs/` esta ignorado por git porque son artefactos reproducibles.
 
-## Identificar Fallas Candidatas
+## Identificar Anomalias Y Fallas Candidatas
 
-La corrida no asigna nombres oficiales de fallas. Produce una grilla/grafo ultrametrico Kozyrev completo y lineamientos candidatos observados desde los registros, despues de residualizar por fuente/distancia/sitio conocido. Revisa primero:
+La corrida no asigna nombres oficiales de fallas. Produce una grilla espacial jerarquica rectangular y lineamientos candidatos observados desde los registros, despues de residualizar por fuente/distancia/sitio conocido. Revisa primero:
 
 ```bash
 tsd-suelo summary --output-dir outputs_precomputed --top-n 20
@@ -219,6 +225,12 @@ tsd-suelo summary --output-dir outputs_precomputed --top-n 20
 Productos principales:
 
 ```text
+spatial_grid_nodes.parquet
+spatial_grid_edges.parquet
+spatial_probability_heatmap.geojson
+spatial_probability_heatmap.kmz
+spatial_anomaly_nodes.geojson
+spatial_fault_edges.geojson
 kozyrev_ultrametric_nodes.parquet
 kozyrev_ultrametric_edges.parquet
 kozyrev_heatmap.geojson
@@ -228,18 +240,19 @@ fault_candidates.geojson
 fault_candidates.kmz
 ```
 
-Cada nodo ultrametrico (`source3d`, `route`, `receiver`) queda como nodo del grafo y cada relacion padre-hijo ultrametrica queda como arista. Las aristas fuente-ruta-receptor tambien se escriben en `kozyrev_ultrametric_edges.parquet`.
+En la grilla espacial, cada celda ocupada en niveles `J1..J12` queda como nodo centrado. Las aristas unen vecinos rectangulares `N/S/E/O` y diagonales. Una falla candidata local aparece como salto dinamico entre celdas vecinas.
 
 Los campos principales son:
 
 ```text
+anomaly_probability_pct
+fault_probability_pct
 failure_probability_pct
 edge_probability_pct
-fault_probability_pct
 probability_basis
 ```
 
-Los porcentajes son probabilidades empiricas relativas observadas, calculadas desde percentiles de salto Kozyrev, norma modal y soporte de registros. No son probabilidades absolutas calibradas con fallas catalogadas. Abre `kozyrev_heatmap.geojson` o `kozyrev_heatmap.kmz` en QGIS/Google Earth para ver el mapa de calor completo, no solo los top 50. Cruza esas capas con cartografia de fallas oficial si necesitas nombres geologicos.
+Los porcentajes son probabilidades empiricas relativas observadas, calculadas por nivel desde percentiles de norma modal, intensidad, soporte y salto entre vecinos. No son probabilidades absolutas calibradas con fallas catalogadas. Abre `spatial_probability_heatmap.geojson` o `spatial_probability_heatmap.kmz` en QGIS/Google Earth para ver el mapa de calor espacial. Cruza esas capas con cartografia de fallas oficial si necesitas nombres geologicos.
 
 ## Dinamica Compatible Para Forward
 

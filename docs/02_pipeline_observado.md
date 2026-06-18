@@ -136,9 +136,42 @@ top_route_anomalies.csv
 top_fault_candidates.csv
 ```
 
+## Grilla Espacial Para Anomalias
+
+La deteccion principal de anomalias usa una grilla rectangular jerarquica `J1..J12`. Cada celda ocupada es un nodo centrado y cada vecino espacial es una arista.
+
+```text
+spatial_grid_nodes.parquet
+spatial_grid_edges.parquet
+spatial_anomaly_nodes.geojson
+spatial_fault_edges.geojson
+spatial_probability_heatmap.geojson
+spatial_probability_heatmap.kmz
+```
+
+Campos principales:
+
+```text
+anomaly_probability_pct
+fault_probability_pct
+mode_jump_norm
+neighbor_orientation
+probability_basis
+```
+
+Interpretacion:
+
+```text
+nodo caliente = celda con dinamica residual anomala
+arista caliente = salto entre celdas vecinas, posible falla/borde
+persistencia entre niveles = mayor confianza cualitativa
+```
+
+Los parquets contienen todos los niveles. Los GeoJSON/KMZ usan el nivel de visualizacion mas fino con vecindad suficiente para QGIS/Google Earth.
+
 ## Grafo Ultrametrico Kozyrev
 
-El build escribe la grilla Kozyrev completa como grafo:
+El build conserva el grafo Kozyrev fuente-ruta-receptor como referencia, pero ya no es la capa principal para detectar fallas espaciales:
 
 ```text
 kozyrev_ultrametric_nodes.parquet
