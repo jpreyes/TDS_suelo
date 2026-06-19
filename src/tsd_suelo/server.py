@@ -32,21 +32,118 @@ def _html_page(title: str, body: str) -> bytes:
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>
-body {{ font-family: Arial, sans-serif; margin: 24px; color: #1d252c; }}
-label {{ display: block; margin: 10px 0 4px; font-weight: 600; }}
-input[type=text], input[type=password], input[type=number], select {{ width: min(760px, 100%); padding: 7px; }}
-button {{ margin: 10px 8px 10px 0; padding: 8px 12px; border: 1px solid #8796a5; background: #f5f8fa; border-radius: 4px; cursor: pointer; }}
-button.danger {{ border-color: #b33; color: #8d1f1f; }}
-pre {{ white-space: pre-wrap; background: #111827; color: #e5e7eb; padding: 12px; max-height: 460px; overflow: auto; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }}
-.card {{ border: 1px solid #d5dde5; border-radius: 6px; padding: 10px; background: #f8fafc; }}
-.note {{ color: #53606d; }}
+:root {{
+  color-scheme: light;
+  --ink: #17212b;
+  --muted: #607080;
+  --line: #d6dee6;
+  --panel: #ffffff;
+  --soft: #f4f7fa;
+  --brand: #205c6b;
+  --brand-strong: #174754;
+  --danger: #9f2f2f;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  color: var(--ink);
+  background: #eef3f6;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}}
+a {{ color: var(--brand); text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+.topbar {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  background: #102832;
+  color: #ffffff;
+}}
+.brand {{ font-weight: 700; letter-spacing: 0; }}
+.nav {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+.nav a {{ color: #dcecf0; font-size: 0.92rem; }}
+.shell {{ max-width: 1220px; margin: 0 auto; padding: 24px; }}
+.page-head {{
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 18px;
+}}
+h1 {{ margin: 0; font-size: 1.8rem; }}
+h2 {{ margin: 0 0 12px; font-size: 1.12rem; }}
+h3 {{ margin: 18px 0 8px; font-size: 0.98rem; }}
+.note {{ color: var(--muted); margin: 6px 0 0; }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 16px 0; }}
+.card, .panel {{
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(16, 40, 50, 0.05);
+}}
+.card {{ padding: 14px; }}
+.card span {{ display: block; color: var(--muted); font-size: 0.82rem; }}
+.card strong {{ display: block; margin-top: 6px; font-size: 1.15rem; }}
+.panel {{ padding: 18px; margin: 16px 0; }}
+.form-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }}
+label {{ display: block; margin: 0 0 5px; font-weight: 650; font-size: 0.88rem; }}
+input[type=text], input[type=password], input[type=number], select {{
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #b9c5cf;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}}
+.check-row {{ display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0 2px; }}
+.check-row label {{ font-weight: 500; }}
+.actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }}
+button {{
+  padding: 9px 13px;
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: #ffffff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 650;
+}}
+button.secondary {{ background: #ffffff; color: var(--brand); }}
+button.danger {{ border-color: var(--danger); background: #ffffff; color: var(--danger); }}
+.status {{ display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; background: #e8f3ee; color: #1f6a46; font-weight: 650; }}
+.status.idle {{ background: #edf1f5; color: #455665; }}
+pre {{
+  white-space: pre-wrap;
+  background: #101923;
+  color: #e5edf4;
+  border-radius: 8px;
+  padding: 14px;
+  max-height: 460px;
+  overflow: auto;
+  font-size: 0.84rem;
+}}
+@media (max-width: 760px) {{
+  .topbar, .page-head {{ grid-template-columns: 1fr; align-items: start; }}
+  .shell {{ padding: 16px; }}
+}}
 </style>
 </head>
 <body>
+<div class="topbar">
+  <div class="brand">TSD-Suelo</div>
+  <nav class="nav">
+    <a href="/results_report.html">Reporte</a>
+    <a href="/admin">Admin</a>
+    <a href="/run.log">run.log</a>
+  </nav>
+</div>
+<main class="shell">
 {body}
+</main>
 </body>
 </html>""".encode("utf-8")
 
@@ -149,6 +246,25 @@ def _build_command(form: dict[str, str], defaults: PipelineConfig) -> list[str]:
     return command
 
 
+def _forward_command(form: dict[str, str], defaults: PipelineConfig) -> list[str]:
+    output_dir = form.get("output_dir") or str(defaults.output_dir)
+    top_n = str(max(1, int(form.get("top_n") or 50)))
+    command = [
+        sys.executable,
+        "-m",
+        "tsd_suelo.cli",
+        "forward",
+        "--output-dir",
+        output_dir,
+        "--top-n",
+        top_n,
+    ]
+    mask_geojson = form.get("mask_geojson") or (str(defaults.mask_geojson) if defaults.mask_geojson else "")
+    if mask_geojson:
+        command.extend(["--mask-geojson", mask_geojson])
+    return command
+
+
 def _handler_factory(config: ServeConfig, state: ProcessState):
     output_dir = config.pipeline.output_dir
 
@@ -224,6 +340,10 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
                 ok, message = state.start("tsd-suelo build", _build_command(form, config.pipeline), config.repo_dir)
                 self._redirect_admin(form.get("token"))
                 return
+            if parsed.path == "/admin/forward":
+                ok, message = state.start("tsd-suelo forward", _forward_command(form, config.pipeline), config.repo_dir)
+                self._redirect_admin(form.get("token"))
+                return
             if parsed.path == "/admin/git-pull":
                 ok, message = state.start("git pull --ff-only", ["git", "pull", "--ff-only"], config.repo_dir)
                 self._redirect_admin(form.get("token"))
@@ -244,82 +364,168 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
             authorized = self._authorized({"token": token})
             if not config.admin_token:
                 body = """
-<h1>TSD-Suelo Admin</h1>
-<p class="note">Admin deshabilitado. Inicia el servidor con <code>--admin-token</code> o define <code>TSD_SUELO_ADMIN_TOKEN</code>.</p>
-<p><a href="/results_report.html">Volver al reporte</a></p>
+<section class="page-head">
+  <div>
+    <h1>Admin</h1>
+    <p class="note">Admin deshabilitado. Inicia el servidor con <code>--admin-token</code> o define <code>TSD_SUELO_ADMIN_TOKEN</code>.</p>
+  </div>
+</section>
+<section class="panel">
+  <a href="/results_report.html">Volver al reporte</a>
+</section>
 """
                 return _html_page("TSD-Suelo Admin", body)
             if not authorized:
                 body = """
-<h1>TSD-Suelo Admin</h1>
-<p class="note">Ingresa el token admin para ver controles de ejecucion.</p>
-<form method="get" action="/admin">
-<label>Token</label>
-<input type="password" name="token" autocomplete="current-password">
-<button type="submit">Entrar</button>
-</form>
-<p><a href="/results_report.html">Volver al reporte</a></p>
+<section class="page-head">
+  <div>
+    <h1>Admin</h1>
+    <p class="note">Ingresa el token admin para ver controles de ejecucion.</p>
+  </div>
+</section>
+<section class="panel">
+  <form method="get" action="/admin">
+    <label>Token</label>
+    <input type="password" name="token" autocomplete="current-password">
+    <div class="actions">
+      <button type="submit">Entrar</button>
+      <a href="/results_report.html">Volver al reporte</a>
+    </div>
+  </form>
+</section>
 """
                 return _html_page("TSD-Suelo Admin", body)
 
             snap = state.snapshot()
             defaults = config.pipeline
+            running = bool(snap.get("running"))
+            status_class = "" if running else " idle"
+            status_text = "corriendo" if running else "sin proceso activo"
+            elapsed = snap.get("elapsed_s")
+            forward_ready = all(
+                (output_dir / name).exists()
+                for name in (
+                    "geo_targets_observed.parquet",
+                    "geo_residuals.parquet",
+                    "latent_modes.parquet",
+                    "kozyrev_graph_fields.parquet",
+                    "fault_candidates.parquet",
+                )
+            )
             body = f"""
-<h1>TSD-Suelo Admin</h1>
-<p><a href="/results_report.html">Reporte</a> | <a href="/kozyrev_heatmap.geojson">kozyrev_heatmap.geojson</a> | <a href="/run.log">run.log</a></p>
+<section class="page-head">
+  <div>
+    <h1>Consola TSD-Suelo</h1>
+    <p class="note">Ejecucion operacional sobre parquets observados y productos derivados.</p>
+  </div>
+  <div class="status{status_class}">{html.escape(status_text)}</div>
+</section>
+
 <div class="grid">
-  <div class="card"><strong>Proceso activo</strong><br>{html.escape(str(snap.get("running")))}</div>
-  <div class="card"><strong>Comando</strong><br>{html.escape(str(snap.get("label") or ""))}</div>
-  <div class="card"><strong>Ultimo retorno</strong><br>{html.escape(str(snap.get("last_returncode")))}</div>
+  <div class="card"><span>Proceso</span><strong>{html.escape(str(snap.get("label") or "ninguno"))}</strong></div>
+  <div class="card"><span>Tiempo activo</span><strong>{html.escape(str(elapsed if elapsed is not None else "-"))} s</strong></div>
+  <div class="card"><span>Ultimo retorno</span><strong>{html.escape(str(snap.get("last_returncode")))}</strong></div>
+  <div class="card"><span>Forward listo</span><strong>{html.escape("si" if forward_ready else "no")}</strong></div>
 </div>
 
-<h2>Build</h2>
-<form method="post" action="/admin/build">
-<input type="hidden" name="token" value="{html.escape(token)}">
-<label>records-dir</label>
-<input type="text" name="records_dir" value="{html.escape(str(defaults.records_dir))}">
-<label>flatfiles-dir</label>
-<input type="text" name="flatfiles_dir" value="{html.escape(str(defaults.flatfiles_dir))}">
-<label>output-dir</label>
-<input type="text" name="output_dir" value="{html.escape(str(defaults.output_dir))}">
-<label>workers</label>
-<input type="number" name="workers" min="1" value="{defaults.workers}">
-<label>progress-every</label>
-<input type="number" name="progress_every" min="1" value="{defaults.progress_every}">
-<label>analysis-mode</label>
-<select name="analysis_mode">
-  <option value="both" {'selected' if defaults.analysis_mode == 'both' else ''}>both: espacial + espectral</option>
-  <option value="spatial" {'selected' if defaults.analysis_mode == 'spatial' else ''}>spatial: grilla espacial</option>
-  <option value="spectral" {'selected' if defaults.analysis_mode == 'spectral' else ''}>spectral: red dinamica en frecuencia</option>
-</select>
-<p>
-<label><input type="checkbox" name="reuse_products" checked> Reusar productos existentes</label>
-<label><input type="checkbox" name="skip_psa"> Omitir PSA</label>
-<label><input type="checkbox" name="no_chile_mask"> Sin mascara Chile</label>
-</p>
-<button type="submit">Lanzar build</button>
-</form>
+<section class="panel">
+  <h2>Forward condicionado</h2>
+  <p class="note">Recalcula solo <code>compatible_dynamics</code>, perfiles de condicionamiento y reporte desde parquets observados existentes. No relee H5.</p>
+  <form method="post" action="/admin/forward">
+    <input type="hidden" name="token" value="{html.escape(token)}">
+    <div class="form-grid">
+      <div>
+        <label>output-dir</label>
+        <input type="text" name="output_dir" value="{html.escape(str(defaults.output_dir))}">
+      </div>
+      <div>
+        <label>top-n reporte</label>
+        <input type="number" name="top_n" min="1" value="80">
+      </div>
+      <div>
+        <label>mask-geojson opcional</label>
+        <input type="text" name="mask_geojson" value="{html.escape(str(defaults.mask_geojson or ""))}">
+      </div>
+    </div>
+    <div class="actions">
+      <button type="submit">Ejecutar forward</button>
+      <a href="/forward_conditioning_template.json">Contrato forward</a>
+      <a href="/forward_conditioning_profiles.parquet">Perfiles parquet</a>
+    </div>
+  </form>
+</section>
 
-<h2>Mantenimiento</h2>
-<form method="post" action="/admin/git-pull" style="display:inline">
-<input type="hidden" name="token" value="{html.escape(token)}">
-<button type="submit">git pull --ff-only</button>
-</form>
-<form method="post" action="/admin/install" style="display:inline">
-<input type="hidden" name="token" value="{html.escape(token)}">
-<button type="submit">pip install -e .</button>
-</form>
-<form method="post" action="/admin/stop" style="display:inline">
-<input type="hidden" name="token" value="{html.escape(token)}">
-<button class="danger" type="submit">Detener proceso</button>
-</form>
+<section class="panel">
+  <h2>Build completo</h2>
+  <form method="post" action="/admin/build">
+    <input type="hidden" name="token" value="{html.escape(token)}">
+    <div class="form-grid">
+      <div>
+        <label>records-dir</label>
+        <input type="text" name="records_dir" value="{html.escape(str(defaults.records_dir))}">
+      </div>
+      <div>
+        <label>flatfiles-dir</label>
+        <input type="text" name="flatfiles_dir" value="{html.escape(str(defaults.flatfiles_dir))}">
+      </div>
+      <div>
+        <label>output-dir</label>
+        <input type="text" name="output_dir" value="{html.escape(str(defaults.output_dir))}">
+      </div>
+      <div>
+        <label>workers</label>
+        <input type="number" name="workers" min="1" value="{defaults.workers}">
+      </div>
+      <div>
+        <label>progress-every</label>
+        <input type="number" name="progress_every" min="1" value="{defaults.progress_every}">
+      </div>
+      <div>
+        <label>analysis-mode</label>
+        <select name="analysis_mode">
+          <option value="both" {'selected' if defaults.analysis_mode == 'both' else ''}>both: espacial + espectral</option>
+          <option value="spatial" {'selected' if defaults.analysis_mode == 'spatial' else ''}>spatial: grilla espacial</option>
+          <option value="spectral" {'selected' if defaults.analysis_mode == 'spectral' else ''}>spectral: red dinamica en frecuencia</option>
+        </select>
+      </div>
+    </div>
+    <div class="check-row">
+      <label><input type="checkbox" name="reuse_products" checked> Reusar productos existentes</label>
+      <label><input type="checkbox" name="skip_psa"> Omitir PSA</label>
+      <label><input type="checkbox" name="no_chile_mask"> Sin mascara Chile</label>
+    </div>
+    <div class="actions">
+      <button type="submit">Lanzar build</button>
+    </div>
+  </form>
+</section>
 
-<h2>Logs</h2>
-<p><a href="/api/log?kind=run&token={html.escape(token)}">run.log</a> | <a href="/api/log?kind=admin&token={html.escape(token)}">admin log</a> | <a href="/api/status?token={html.escape(token)}">status JSON</a></p>
-<h3>run.log</h3>
-<pre>{html.escape(_tail(output_dir / "run.log"))}</pre>
-<h3>admin log</h3>
-<pre>{html.escape(_tail(state.admin_log))}</pre>
+<section class="panel">
+  <h2>Mantenimiento</h2>
+  <div class="actions">
+    <form method="post" action="/admin/git-pull">
+      <input type="hidden" name="token" value="{html.escape(token)}">
+      <button class="secondary" type="submit">git pull --ff-only</button>
+    </form>
+    <form method="post" action="/admin/install">
+      <input type="hidden" name="token" value="{html.escape(token)}">
+      <button class="secondary" type="submit">pip install -e .</button>
+    </form>
+    <form method="post" action="/admin/stop">
+      <input type="hidden" name="token" value="{html.escape(token)}">
+      <button class="danger" type="submit">Detener proceso</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Logs</h2>
+  <p><a href="/api/log?kind=run&token={html.escape(token)}">run.log</a> | <a href="/api/log?kind=admin&token={html.escape(token)}">admin log</a> | <a href="/api/status?token={html.escape(token)}">status JSON</a></p>
+  <h3>run.log</h3>
+  <pre>{html.escape(_tail(output_dir / "run.log"))}</pre>
+  <h3>admin log</h3>
+  <pre>{html.escape(_tail(state.admin_log))}</pre>
+</section>
 """
             return _html_page("TSD-Suelo Admin", body)
 

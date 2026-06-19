@@ -117,6 +117,65 @@ def run_targets(config: PipelineConfig, log: LogFn | None = None):
     )
 
 
+def run_forward(config: PipelineConfig, log: LogFn | None = None, top_n: int = 50) -> dict[str, Any]:
+    cfg = config.resolved()
+    ensure_dir(cfg.output_dir)
+    required = {
+        "geo_targets_observed": cfg.output_dir / "geo_targets_observed.parquet",
+        "geo_residuals": cfg.output_dir / "geo_residuals.parquet",
+        "latent_modes": cfg.output_dir / "latent_modes.parquet",
+        "kozyrev_graph_fields": cfg.output_dir / "kozyrev_graph_fields.parquet",
+        "fault_candidates": cfg.output_dir / "fault_candidates.parquet",
+    }
+    missing = [str(path) for path in required.values() if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            "No se puede ejecutar forward sin productos observados previos. "
+            "Corre build primero o revisa output-dir. Faltan: " + ", ".join(missing)
+        )
+
+    with PhaseTimer(log, "FORWARD condicionado desde productos observados"):
+        geo_targets = _read_parquet(required["geo_targets_observed"])
+        residuals = _read_parquet(required["geo_residuals"])
+        modes = _read_parquet(required["latent_modes"])
+        kozyrev_fields = _read_parquet(required["kozyrev_graph_fields"])
+        fault_candidates = _read_parquet(required["fault_candidates"])
+        compatible_dynamics, forward_profiles = write_forward_products(
+            geo_targets,
+            residuals,
+            modes,
+            kozyrev_fields,
+            fault_candidates,
+            cfg.output_dir,
+        )
+        build_results_report(cfg.output_dir, mask_geojson=cfg.mask_geojson, top_n=top_n)
+
+    manifest = {
+        "output_dir": str(cfg.output_dir),
+        "mode": "forward_conditioned_observed",
+        "top_n": int(top_n),
+        "inputs": {name: str(path) for name, path in required.items()},
+        "rows": {
+            "compatible_dynamics": int(compatible_dynamics.shape[0]),
+            "forward_conditioning_profiles": int(forward_profiles.shape[0]),
+        },
+        "products": [
+            "compatible_dynamics.parquet",
+            "forward_conditioning_profiles.parquet",
+            "forward_conditioning_template.json",
+            "results_report.html",
+            "results_summary.json",
+        ],
+    }
+    write_json(cfg.output_dir / "forward_manifest.json", manifest)
+    _log(
+        log,
+        "Forward compatible dynamics filas="
+        f"{compatible_dynamics.shape[0]} profiles={forward_profiles.shape[0]}",
+    )
+    return manifest
+
+
 def run_build(config: PipelineConfig, log: LogFn | None = None) -> dict[str, Any]:
     cfg = config.resolved()
     ensure_dir(cfg.output_dir)

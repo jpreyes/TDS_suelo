@@ -52,6 +52,7 @@ tsd-suelo build \
 tsd-suelo inventory
 tsd-suelo targets --max-h5 20
 tsd-suelo build --records-dir ../records --flatfiles-dir ../records/flatfiles --output-dir outputs
+tsd-suelo forward --output-dir outputs
 tsd-suelo summary --output-dir outputs
 tsd-suelo report --output-dir outputs
 ```
@@ -101,6 +102,25 @@ tsd-suelo build --records-dir ../records --flatfiles-dir ../flatfiles --output-d
 ```
 
 El modo `spectral` reabre los H5 la primera vez para construir firmas espectrales completas en una grilla de frecuencias comun; despues queda reutilizable como parquet.
+
+Para recalcular solo la dinamica compatible y los perfiles de forward desde productos observados ya existentes, sin releer H5:
+
+```bash
+tsd-suelo forward \
+  --output-dir outputs_precomputed \
+  --top-n 80
+```
+
+Ese comando actualiza:
+
+```text
+compatible_dynamics.parquet
+forward_conditioning_profiles.parquet
+forward_conditioning_template.json
+forward_manifest.json
+results_report.html
+results_summary.json
+```
 
 Si se corta despues de haber calculado `waveform_targets_observed.parquet`, pero antes de terminar todo, puedes retomar sin releer H5:
 
@@ -387,8 +407,8 @@ tsd-suelo serve \
   --port 8787
 ```
 
-Luego abre `https://tsd.jpreyes.cl/admin`. Desde esa pagina puedes lanzar `build`, `git pull --ff-only`, `pip install -e .`, detener un proceso, ver logs y descargar productos. Usa esto solo con token fuerte y preferentemente detras de Cloudflare Access.
+Luego abre `https://tsd.jpreyes.cl/admin`. Desde esa pagina puedes lanzar `build`, ejecutar `forward` condicionado desde parquets existentes, hacer `git pull --ff-only`, `pip install -e .`, detener un proceso, ver logs y descargar productos. Usa esto solo con token fuerte y preferentemente detras de Cloudflare Access.
 
-Abre `http://localhost:8000/results_report.html`.
+Abre `https://tsd.jpreyes.cl/results_report.html`. El reporte incluye un mapa interactivo con OpenStreetMap/Leaflet, capas de Chile, dinamica espectral, fallas candidatas, grilla espacial, Kozyrev y atlas.
 
 Tambien puedes descargar `outputs/atlas_geologico.geojson` o `outputs/atlas_geologico.kmz` y abrirlos en QGIS/Google Earth.

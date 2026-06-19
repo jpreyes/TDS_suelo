@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tsd_suelo.config import PipelineConfig
-from tsd_suelo.server import _build_command
+from tsd_suelo.server import _build_command, _forward_command
 
 
 def test_build_command_uses_configured_external_paths(tmp_path: Path) -> None:
@@ -33,3 +33,21 @@ def test_build_command_uses_configured_external_paths(tmp_path: Path) -> None:
     assert command[command.index("--workers") + 1] == "8"
     assert command[command.index("--analysis-mode") + 1] == "spectral"
     assert "--reuse-products" in command
+
+
+def test_forward_command_uses_existing_output_dir(tmp_path: Path) -> None:
+    cfg = PipelineConfig(
+        records_dir=tmp_path / "records",
+        flatfiles_dir=tmp_path / "flatfiles",
+        output_dir=tmp_path / "outputs_precomputed",
+    )
+    command = _forward_command(
+        {
+            "output_dir": "outputs_precomputed",
+            "top_n": "80",
+        },
+        cfg,
+    )
+    assert "forward" in command
+    assert command[command.index("--output-dir") + 1] == "outputs_precomputed"
+    assert command[command.index("--top-n") + 1] == "80"

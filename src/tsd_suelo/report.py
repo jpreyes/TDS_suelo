@@ -52,6 +52,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     fault_top = _top_faults(faults, top_n)
     ultrametric_node_top = _top_ultrametric_nodes(ultrametric_nodes, top_n)
     ultrametric_edge_top = _top_ultrametric_edges(ultrametric_edges, top_n)
+    forward_top = _top_compatible_dynamics(compatible, top_n)
+    forward_profile_top = _top_forward_profiles(profiles, top_n)
 
     kozyrev_top.to_csv(output_dir / "top_kozyrev_anomalies.csv", index=False)
     receiver_top.to_csv(output_dir / "top_receiver_anomalies.csv", index=False)
@@ -92,6 +94,8 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         spectral_edge_top=spectral_edge_top,
         ultrametric_node_top=ultrametric_node_top,
         ultrametric_edge_top=ultrametric_edge_top,
+        forward_top=forward_top,
+        forward_profile_top=forward_profile_top,
         fault_top=fault_top,
         receiver_top=receiver_top,
         route_top=route_top,
@@ -305,6 +309,48 @@ def _top_spectral_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return edges.sort_values("spectral_transfer_probability_pct", ascending=False)[[c for c in cols if c in edges.columns]].head(top_n)
 
 
+def _top_compatible_dynamics(compatible: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if compatible.empty or "dynamic_anomaly_score" not in compatible.columns:
+        return pd.DataFrame()
+    cols = [
+        "record_observed_id",
+        "observed_source",
+        "event_id",
+        "station_id",
+        "route_id",
+        "distance_km",
+        "mw",
+        "dynamic_anomaly_score",
+        "forward_support_weight",
+        "fault_probability_pct",
+        "fault_candidate_id",
+        "compatible_dynamics_status",
+        "target_coverage_fraction",
+    ]
+    return compatible.sort_values("dynamic_anomaly_score", ascending=False)[[c for c in cols if c in compatible.columns]].head(top_n)
+
+
+def _top_forward_profiles(profiles: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if profiles.empty:
+        return pd.DataFrame()
+    sort_col = "dynamic_anomaly_score_p90" if "dynamic_anomaly_score_p90" in profiles.columns else "n_records"
+    cols = [
+        "context_type",
+        "level",
+        "context_id",
+        "n_records",
+        "centroid_latitude_deg",
+        "centroid_longitude_deg",
+        "dynamic_anomaly_score_mean",
+        "dynamic_anomaly_score_p90",
+        "forward_support_weight_mean",
+        "forward_support_weight_p90",
+        "fault_candidate_score_mean",
+        "fault_candidate_score_p90",
+    ]
+    return profiles.sort_values(sort_col, ascending=False)[[c for c in cols if c in profiles.columns]].head(top_n)
+
+
 def _top_faults(faults: pd.DataFrame, top_n: int) -> pd.DataFrame:
     if faults.empty:
         return pd.DataFrame()
@@ -376,6 +422,8 @@ def _render_html(
     spectral_edge_top: pd.DataFrame,
     ultrametric_node_top: pd.DataFrame,
     ultrametric_edge_top: pd.DataFrame,
+    forward_top: pd.DataFrame,
+    forward_profile_top: pd.DataFrame,
     fault_top: pd.DataFrame,
     receiver_top: pd.DataFrame,
     route_top: pd.DataFrame,
@@ -392,70 +440,193 @@ def _render_html(
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TSD-Suelo Results</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-body {{ font-family: Arial, sans-serif; margin: 24px; color: #1d252c; }}
-h1, h2 {{ margin: 0.8rem 0; }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 18px 0; }}
-.metric {{ border: 1px solid #d5dde5; border-radius: 6px; padding: 10px; background: #f8fafc; }}
-.metric strong {{ display: block; font-size: 1.4rem; }}
-table {{ border-collapse: collapse; width: 100%; margin: 12px 0 24px; font-size: 0.88rem; }}
-th, td {{ border: 1px solid #d9e0e7; padding: 6px 8px; text-align: left; }}
-th {{ background: #edf2f7; }}
-svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; background: #f9fbfd; }}
-.map-shell {{ max-width: 1180px; margin: 14px 0 24px; border: 1px solid #cfd8df; background: #f8fafc; }}
+:root {{
+  --ink: #17212b;
+  --muted: #617180;
+  --line: #d7e0e7;
+  --panel: #ffffff;
+  --soft: #f4f7fa;
+  --brand: #205c6b;
+  --brand-strong: #163f4b;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  color: var(--ink);
+  background: #eef3f6;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}}
+a {{ color: var(--brand); text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+.report-shell {{ max-width: 1280px; margin: 0 auto; padding: 22px; }}
+.hero {{
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: end;
+  padding: 26px;
+  color: #ffffff;
+  background: #102832;
+  border-bottom: 4px solid #2f7d8c;
+}}
+.eyebrow {{ margin: 0 0 8px; color: #a8d6df; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0; }}
+h1 {{ margin: 0; font-size: clamp(1.75rem, 2.4vw, 2.45rem); }}
+.hero .note {{ color: #d4e8ed; max-width: 860px; }}
+.hero-actions {{ display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }}
+.button-link {{ display: inline-flex; align-items: center; min-height: 36px; padding: 8px 11px; border: 1px solid #7bb8c4; border-radius: 6px; color: #ffffff; background: rgba(255,255,255,0.08); font-weight: 650; }}
+.button-link:hover {{ text-decoration: none; background: rgba(255,255,255,0.14); }}
+.subnav {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }}
+.subnav a {{ padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; background: #ffffff; color: var(--brand-strong); font-size: 0.9rem; }}
+h2 {{ margin: 0; font-size: 1.2rem; }}
+.section-head {{ display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 12px; }}
+.panel {{ margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 1px 2px rgba(16,40,50,0.05); }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; margin: 18px 0; }}
+.metric {{ border: 1px solid var(--line); border-radius: 8px; padding: 13px; background: var(--panel); box-shadow: 0 1px 2px rgba(16,40,50,0.04); }}
+.metric span {{ display: block; color: var(--muted); font-size: 0.82rem; }}
+.metric strong {{ display: block; margin-top: 6px; font-size: 1.42rem; }}
+.table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; }}
+table {{ border-collapse: collapse; width: 100%; margin: 0; font-size: 0.84rem; }}
+th, td {{ border-bottom: 1px solid #e3e9ee; padding: 7px 9px; text-align: left; vertical-align: top; }}
+th {{ position: sticky; top: 0; background: #edf3f6; color: #263845; z-index: 1; }}
+tr:nth-child(even) td {{ background: #fafcfd; }}
+svg {{ width: 100%; max-width: 100%; height: 760px; border: 1px solid var(--line); background: #f9fbfd; border-radius: 8px; }}
+.map-shell {{ max-width: 100%; margin: 14px 0 0; border: 1px solid var(--line); background: #f8fafc; border-radius: 8px; overflow: hidden; }}
 #interactive-map {{ width: 100%; height: min(78vh, 760px); min-height: 520px; }}
 .map-controls {{ display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 12px; border-top: 1px solid #d9e0e7; background: #ffffff; }}
 .map-controls label {{ white-space: nowrap; font-size: 0.9rem; }}
 .map-status {{ padding: 8px 12px; color: #53606d; font-size: 0.86rem; border-top: 1px solid #d9e0e7; background: #ffffff; }}
 .leaflet-popup-content table {{ margin: 6px 0 0; font-size: 0.78rem; }}
 .leaflet-popup-content th, .leaflet-popup-content td {{ padding: 3px 5px; }}
+.downloads {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }}
+.downloads a {{ display: block; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); color: var(--brand-strong); font-size: 0.88rem; }}
+.downloads a:hover {{ text-decoration: none; background: #e7eff3; }}
 .note {{ color: #53606d; }}
+@media (max-width: 760px) {{
+  .hero {{ grid-template-columns: 1fr; padding: 20px; }}
+  .hero-actions {{ justify-content: flex-start; }}
+  .report-shell {{ padding: 14px; }}
+}}
 </style>
 </head>
 <body>
-<h1>TSD-Suelo Results</h1>
-<p class="note">Mascara: {html.escape(str(summary.get("mask_name", "")))}. Reporte autonomo generado desde parquets locales.</p>
-{_summary_grid(summary)}
-<h2>Descargas</h2>
-{_download_links(output_dir)}
-<h2>Mapa Interactivo Chile</h2>
-<p class="note">Leaflet + OpenStreetMap. Carga GeoJSON locales desde esta misma carpeta; no usa Google Maps ni API key.</p>
-{_interactive_leaflet_map(output_dir)}
-<h2>Mapa De Calor Espacial</h2>
-<p class="note">Celdas rectangulares por probabilidad de anomalia y aristas vecinas por probabilidad de falla. Azul bajo, amarillo medio, rojo alto. Los parquets contienen todos los niveles.</p>
-{_svg_spatial_probability_map(spatial_nodes, spatial_edges, mask)}
-<h2>Mapa Dinamico Espectral</h2>
-<p class="note">Red estructural equivalente en frecuencia: celdas por dinamica espectral y aristas por salto/transmisibilidad usando todas las frecuencias de la grilla espectral simultaneamente.</p>
-{_svg_spectral_probability_map(spectral_nodes, spectral_edges, mask)}
-<h2>Candidatos De Falla</h2>
-<p class="note">Lineamientos observados por concentracion de modos residuales y saltos Kozyrev. No son nombres oficiales de fallas.</p>
-{_table_html(fault_top)}
-<h2>Celdas Espaciales Anomalas</h2>
-{_table_html(spatial_node_top)}
-<h2>Aristas Espaciales Con Salto</h2>
-{_table_html(spatial_edge_top)}
-<h2>Nodos Dinamicos Espectrales</h2>
-{_table_html(spectral_node_top)}
-<h2>Aristas De Transmisibilidad Espectral</h2>
-{_table_html(spectral_edge_top)}
-<h2>Mapa Kozyrev Anterior</h2>
-<p class="note">Referencia del grafo fuente-ruta-receptor anterior. El detector espacial es la capa principal para patrones de falla.</p>
-{_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
-<h2>Nodos Ultrametricos Kozyrev</h2>
-{_table_html(ultrametric_node_top)}
-<h2>Aristas Ultrametricas Kozyrev</h2>
-{_table_html(ultrametric_edge_top)}
-<h2>Top Kozyrev</h2>
-{_table_html(kozyrev_top)}
-<h2>Top Receptores</h2>
-{_table_html(receiver_top)}
-<h2>Top Rutas</h2>
-{_table_html(route_top)}
-<h2>Atribucion Por Target</h2>
-{_table_html(attribution)}
+<header class="hero">
+  <div>
+    <p class="eyebrow">TSD-Suelo observado</p>
+    <h1>Atlas dinamico fuente-ruta-receptor</h1>
+    <p class="note">Mascara: {html.escape(str(summary.get("mask_name", "")))}. Reporte autonomo generado desde parquets locales observados.</p>
+  </div>
+  <div class="hero-actions">
+    <a class="button-link" href="/admin">Admin</a>
+    <a class="button-link" href="results_summary.json" download>Resumen JSON</a>
+    <a class="button-link" href="run.log">run.log</a>
+  </div>
+</header>
+<main class="report-shell">
+  <nav class="subnav">
+    <a href="#mapa">Mapa</a>
+    <a href="#forward">Forward</a>
+    <a href="#fallas">Fallas</a>
+    <a href="#espectral">Espectral</a>
+    <a href="#espacial">Espacial</a>
+    <a href="#kozyrev">Kozyrev</a>
+    <a href="#descargas">Descargas</a>
+  </nav>
+  {_summary_grid(summary)}
+
+  <section class="panel" id="mapa">
+    <div class="section-head">
+      <h2>Mapa Interactivo Chile</h2>
+      <span class="note">Leaflet + OpenStreetMap, sin API key</span>
+    </div>
+    <p class="note">Carga GeoJSON locales desde esta misma carpeta. Activa o desactiva capas para inspeccionar fallas, dinamica espectral, anomalias espaciales y atlas.</p>
+    {_interactive_leaflet_map(output_dir)}
+  </section>
+
+  <section class="panel" id="forward">
+    <div class="section-head">
+      <h2>Forward Condicionado</h2>
+      <span class="note">Dinamica compatible reutilizable</span>
+    </div>
+    <p class="note">Productos observados para condicionamiento posterior. No son acelerogramas sinteticos; son correcciones y perfiles multiescala listos para un forward condicionado validado.</p>
+    <h3>Registros con mayor dinamica compatible</h3>
+    {_table_html(forward_top)}
+    <h3>Perfiles de condicionamiento</h3>
+    {_table_html(forward_profile_top)}
+  </section>
+
+  <section class="panel" id="fallas">
+    <div class="section-head">
+      <h2>Candidatos De Falla</h2>
+      <span class="note">Lineamientos no catalogados oficialmente</span>
+    </div>
+    {_table_html(fault_top)}
+  </section>
+
+  <section class="panel" id="espectral">
+    <div class="section-head">
+      <h2>Mapa Dinamico Espectral</h2>
+      <span class="note">Celdas por respuesta, lineas por transmisibilidad</span>
+    </div>
+    <p class="note">Red estructural equivalente en frecuencia usando todas las frecuencias de la grilla espectral simultaneamente.</p>
+    {_svg_spectral_probability_map(spectral_nodes, spectral_edges, mask)}
+    <h3>Nodos dinamicos espectrales</h3>
+    {_table_html(spectral_node_top)}
+    <h3>Aristas de transmisibilidad espectral</h3>
+    {_table_html(spectral_edge_top)}
+  </section>
+
+  <section class="panel" id="espacial">
+    <div class="section-head">
+      <h2>Mapa De Calor Espacial</h2>
+      <span class="note">Grilla rectangular de anomalias</span>
+    </div>
+    <p class="note">Celdas rectangulares por probabilidad de anomalia y aristas vecinas por probabilidad de falla. Azul bajo, amarillo medio, rojo alto.</p>
+    {_svg_spatial_probability_map(spatial_nodes, spatial_edges, mask)}
+    <h3>Celdas espaciales anomalas</h3>
+    {_table_html(spatial_node_top)}
+    <h3>Aristas espaciales con salto</h3>
+    {_table_html(spatial_edge_top)}
+  </section>
+
+  <section class="panel" id="kozyrev">
+    <div class="section-head">
+      <h2>Kozyrev Y Rutas</h2>
+      <span class="note">Referencia fuente-ruta-receptor anterior</span>
+    </div>
+    {_svg_probability_map(ultrametric_nodes, ultrametric_edges, mask)}
+    <h3>Nodos ultrametricos Kozyrev</h3>
+    {_table_html(ultrametric_node_top)}
+    <h3>Aristas ultrametricas Kozyrev</h3>
+    {_table_html(ultrametric_edge_top)}
+    <h3>Top Kozyrev</h3>
+    {_table_html(kozyrev_top)}
+    <h3>Top receptores</h3>
+    {_table_html(receiver_top)}
+    <h3>Top rutas</h3>
+    {_table_html(route_top)}
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Atribucion Por Target</h2>
+      <span class="note">Calidad residual por familia fisica</span>
+    </div>
+    {_table_html(attribution)}
+  </section>
+
+  <section class="panel" id="descargas">
+    <div class="section-head">
+      <h2>Descargas</h2>
+      <span class="note">Productos reproducibles</span>
+    </div>
+    {_download_links(output_dir)}
+  </section>
+</main>
 </body>
 </html>"""
 
@@ -490,7 +661,8 @@ def _summary_grid(summary: dict[str, Any]) -> str:
 def _table_html(df: pd.DataFrame) -> str:
     if df.empty:
         return "<p class='note'>Sin datos.</p>"
-    return df.to_html(index=False, escape=True, float_format=lambda x: f"{x:.4g}")
+    table = df.to_html(index=False, escape=True, float_format=lambda x: f"{x:.4g}")
+    return f"<div class='table-wrap'>{table}</div>"
 
 
 def _download_links(output_dir: Path) -> str:
@@ -524,6 +696,7 @@ def _download_links(output_dir: Path) -> str:
         ("Top Kozyrev CSV", "top_kozyrev_anomalies.csv"),
         ("Dinamica compatible parquet", "compatible_dynamics.parquet"),
         ("Perfiles forward parquet", "forward_conditioning_profiles.parquet"),
+        ("Manifest forward JSON", "forward_manifest.json"),
         ("Nodos ultrametricos parquet", "kozyrev_ultrametric_nodes.parquet"),
         ("Aristas ultrametricas parquet", "kozyrev_ultrametric_edges.parquet"),
         ("Log build", "run.log"),
@@ -534,7 +707,7 @@ def _download_links(output_dir: Path) -> str:
             links.append(f"<li><a href='{html.escape(filename)}' download>{html.escape(label)}</a></li>")
     if not links:
         return "<p class='note'>Sin archivos de descarga todavia.</p>"
-    return "<ul>" + "".join(links) + "</ul>"
+    return "<ul class='downloads'>" + "".join(links) + "</ul>"
 
 
 def _interactive_leaflet_map(output_dir: Path) -> str:

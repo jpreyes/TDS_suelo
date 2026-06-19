@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import DEFAULT_FLATFILES_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_RECORDS_DIR, PipelineConfig
 from .logging_utils import RunLogger
-from .pipeline import run_build, run_inventory, run_targets
+from .pipeline import run_build, run_forward, run_inventory, run_targets
 from .report import build_results_report, print_summary
 
 
@@ -15,7 +15,7 @@ def _base_parser() -> argparse.ArgumentParser:
         description="Pipeline TSD-Suelo observado desde H5 y flatfiles primarios.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for name in ("inventory", "targets", "build", "report", "summary", "serve"):
+    for name in ("inventory", "targets", "build", "forward", "report", "summary", "serve"):
         cmd = subparsers.add_parser(name)
         cmd.add_argument("--records-dir", type=Path, default=DEFAULT_RECORDS_DIR)
         cmd.add_argument("--flatfiles-dir", type=Path, default=DEFAULT_FLATFILES_DIR)
@@ -81,6 +81,13 @@ def main(argv: list[str] | None = None) -> int:
         manifest = run_build(cfg, log=None)
         print(f"Build completo en {manifest['output_dir']}")
         print(f"Log: {manifest['log_file']}")
+        for name, rows in manifest["rows"].items():
+            print(f"  {name}: {rows}")
+        return 0
+    if args.command == "forward":
+        with RunLogger(cfg.log_file or (cfg.output_dir.expanduser().resolve() / "run.log"), verbose=not cfg.quiet) as log:
+            manifest = run_forward(cfg, log=log, top_n=args.top_n)
+        print(f"Forward escrito en {manifest['output_dir']}")
         for name, rows in manifest["rows"].items():
             print(f"  {name}: {rows}")
         return 0

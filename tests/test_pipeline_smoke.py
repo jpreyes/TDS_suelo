@@ -116,6 +116,7 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     report_html = (out / "results_report.html").read_text(encoding="utf-8")
     assert "Mapa Interactivo Chile" in report_html
     assert "interactive-map" in report_html
+    assert "Forward Condicionado" in report_html
     assert "Mapa De Calor Espacial" in report_html
     faults = pd.read_parquet(out / "fault_candidates.parquet")
     assert {"candidate_id", "fault_candidate_score", "fault_probability_pct", "strike_deg"}.issubset(faults.columns)
@@ -136,6 +137,7 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     profiles = pd.read_parquet(out / "forward_conditioning_profiles.parquet")
     assert {"context_type", "context_id", "n_records"}.issubset(profiles.columns)
     assert (out / "waveform_targets_errors.csv").exists()
+    assert (out / "forward_conditioning_template.json").exists()
     meta = pd.read_json(out / "waveform_targets_observed.meta.json", typ="series")
     assert int(meta["h5_errors"]) == 1
 
