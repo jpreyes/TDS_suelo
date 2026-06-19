@@ -113,7 +113,10 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert {"distance_km", "backazimuth_deg", "pga_h_g"}.issubset(geo.columns)
     assert set(geo["observed_source"]) == {"h5", "flatfile"}
     assert (out / "results_report.html").exists()
-    assert "Mapa De Calor Espacial" in (out / "results_report.html").read_text(encoding="utf-8")
+    report_html = (out / "results_report.html").read_text(encoding="utf-8")
+    assert "Mapa Interactivo Chile" in report_html
+    assert "interactive-map" in report_html
+    assert "Mapa De Calor Espacial" in report_html
     faults = pd.read_parquet(out / "fault_candidates.parquet")
     assert {"candidate_id", "fault_candidate_score", "fault_probability_pct", "strike_deg"}.issubset(faults.columns)
     spatial_nodes = pd.read_parquet(out / "spatial_grid_nodes.parquet")

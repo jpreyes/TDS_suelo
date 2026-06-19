@@ -393,6 +393,8 @@ def _render_html(
 <head>
 <meta charset="utf-8">
 <title>TSD-Suelo Results</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 body {{ font-family: Arial, sans-serif; margin: 24px; color: #1d252c; }}
 h1, h2 {{ margin: 0.8rem 0; }}
@@ -403,6 +405,13 @@ table {{ border-collapse: collapse; width: 100%; margin: 12px 0 24px; font-size:
 th, td {{ border: 1px solid #d9e0e7; padding: 6px 8px; text-align: left; }}
 th {{ background: #edf2f7; }}
 svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; background: #f9fbfd; }}
+.map-shell {{ max-width: 1180px; margin: 14px 0 24px; border: 1px solid #cfd8df; background: #f8fafc; }}
+#interactive-map {{ width: 100%; height: min(78vh, 760px); min-height: 520px; }}
+.map-controls {{ display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 12px; border-top: 1px solid #d9e0e7; background: #ffffff; }}
+.map-controls label {{ white-space: nowrap; font-size: 0.9rem; }}
+.map-status {{ padding: 8px 12px; color: #53606d; font-size: 0.86rem; border-top: 1px solid #d9e0e7; background: #ffffff; }}
+.leaflet-popup-content table {{ margin: 6px 0 0; font-size: 0.78rem; }}
+.leaflet-popup-content th, .leaflet-popup-content td {{ padding: 3px 5px; }}
 .note {{ color: #53606d; }}
 </style>
 </head>
@@ -412,6 +421,9 @@ svg {{ width: 100%; max-width: 920px; height: 760px; border: 1px solid #d5dde5; 
 {_summary_grid(summary)}
 <h2>Descargas</h2>
 {_download_links(output_dir)}
+<h2>Mapa Interactivo Chile</h2>
+<p class="note">Leaflet + OpenStreetMap. Carga GeoJSON locales desde esta misma carpeta; no usa Google Maps ni API key.</p>
+{_interactive_leaflet_map(output_dir)}
 <h2>Mapa De Calor Espacial</h2>
 <p class="note">Celdas rectangulares por probabilidad de anomalia y aristas vecinas por probabilidad de falla. Azul bajo, amarillo medio, rojo alto. Los parquets contienen todos los niveles.</p>
 {_svg_spatial_probability_map(spatial_nodes, spatial_edges, mask)}
@@ -523,6 +535,288 @@ def _download_links(output_dir: Path) -> str:
     if not links:
         return "<p class='note'>Sin archivos de descarga todavia.</p>"
     return "<ul>" + "".join(links) + "</ul>"
+
+
+def _interactive_leaflet_map(output_dir: Path) -> str:
+    layer_defs = [
+        {
+            "id": "mask",
+            "label": "Chile",
+            "file": "chile_mask.geojson",
+            "kind": "mask",
+            "checked": True,
+        },
+        {
+            "id": "spectral",
+            "label": "Dinamica espectral",
+            "file": "spectral_dynamic_heatmap.geojson",
+            "kind": "spectral",
+            "checked": True,
+        },
+        {
+            "id": "faults",
+            "label": "Fallas candidatas",
+            "file": "fault_candidates.geojson",
+            "kind": "faults",
+            "checked": True,
+        },
+        {
+            "id": "spatial",
+            "label": "Anomalia espacial",
+            "file": "spatial_probability_heatmap.geojson",
+            "kind": "spatial",
+            "checked": False,
+        },
+        {
+            "id": "kozyrev",
+            "label": "Kozyrev",
+            "file": "kozyrev_heatmap.geojson",
+            "kind": "kozyrev",
+            "checked": False,
+        },
+        {
+            "id": "atlas",
+            "label": "Atlas geologico",
+            "file": "atlas_geologico.geojson",
+            "kind": "atlas",
+            "checked": False,
+        },
+    ]
+    layers = [layer for layer in layer_defs if (output_dir / layer["file"]).exists()]
+    if not layers:
+        return "<p class='note'>Sin GeoJSON para mapa interactivo.</p>"
+
+    template = """
+<div class="map-shell">
+  <div id="interactive-map"></div>
+  <div class="map-controls" id="interactive-map-controls"></div>
+  <div class="map-status" id="interactive-map-status">Preparando mapa...</div>
+</div>
+<script>
+(function () {
+  const layerConfigs = __LAYER_CONFIGS__;
+  const status = document.getElementById("interactive-map-status");
+  const controls = document.getElementById("interactive-map-controls");
+  const container = document.getElementById("interactive-map");
+  if (!window.L) {
+    status.textContent = "Leaflet no cargo. Revisa conexion a internet o usa los mapas SVG/GeoJSON descargables.";
+    return;
+  }
+
+  const map = L.map(container, { preferCanvas: true }).setView([-30.5, -71.0], 5);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  const layerState = new Map();
+  const probabilityFields = [
+    "spectral_dynamic_probability_pct",
+    "spectral_transfer_probability_pct",
+    "fault_probability_pct",
+    "anomaly_probability_pct",
+    "failure_probability_pct",
+    "edge_probability_pct",
+    "mode_probability_pct",
+    "intensity_probability_pct",
+    "support_probability_pct"
+  ];
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function asNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function probability(props) {
+    for (const field of probabilityFields) {
+      const value = asNumber(props[field]);
+      if (value !== null) {
+        return clamp(value, 0, 100);
+      }
+    }
+    return 50;
+  }
+
+  function probabilityColor(value) {
+    const p = clamp(value, 0, 100) / 100;
+    const a = p <= 0.5 ? [44, 123, 182] : [255, 255, 191];
+    const b = p <= 0.5 ? [255, 255, 191] : [215, 25, 28];
+    const t = p <= 0.5 ? p / 0.5 : (p - 0.5) / 0.5;
+    const rgb = a.map((start, i) => Math.round(start + t * (b[i] - start)));
+    return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  }
+
+  function styleFeature(feature, config) {
+    const props = feature.properties || {};
+    const geometryType = feature.geometry ? feature.geometry.type : "";
+    if (config.kind === "mask") {
+      return {
+        color: "#255f49",
+        weight: 2,
+        opacity: 0.95,
+        fillColor: "#9bd3ae",
+        fillOpacity: 0.18
+      };
+    }
+    const p = probability(props);
+    const color = probabilityColor(p);
+    if (geometryType.includes("Polygon")) {
+      return {
+        color: "#24333d",
+        weight: config.kind === "spectral" ? 0.7 : 0.45,
+        opacity: 0.55,
+        fillColor: color,
+        fillOpacity: 0.20 + 0.62 * p / 100
+      };
+    }
+    if (geometryType.includes("LineString")) {
+      return {
+        color,
+        weight: 0.8 + 4.2 * p / 100,
+        opacity: 0.22 + 0.74 * p / 100
+      };
+    }
+    return {
+      color,
+      weight: 1.2,
+      fillColor: color,
+      fillOpacity: 0.72
+    };
+  }
+
+  function pointLayer(feature, latlng, config) {
+    const p = probability(feature.properties || {});
+    return L.circleMarker(latlng, {
+      radius: 3 + 7 * p / 100,
+      color: "#24333d",
+      weight: 0.5,
+      fillColor: probabilityColor(p),
+      fillOpacity: 0.78
+    });
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (char) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"}[char];
+    });
+  }
+
+  function popupHtml(feature, config) {
+    const props = feature.properties || {};
+    const preferred = [
+      "feature_type",
+      "cell_id",
+      "node_id",
+      "candidate_id",
+      "level",
+      "display_level",
+      "n_records",
+      "n_events",
+      "n_stations",
+      "spectral_dynamic_probability_pct",
+      "spectral_transfer_probability_pct",
+      "fault_probability_pct",
+      "anomaly_probability_pct",
+      "failure_probability_pct",
+      "edge_probability_pct",
+      "strike_deg",
+      "center_latitude_deg",
+      "center_longitude_deg",
+      "midpoint_latitude_deg",
+      "midpoint_longitude_deg"
+    ];
+    const rows = [];
+    const used = new Set();
+    for (const key of preferred) {
+      if (props[key] !== undefined && props[key] !== null) {
+        rows.push([key, props[key]]);
+        used.add(key);
+      }
+    }
+    for (const key of Object.keys(props)) {
+      if (rows.length >= 14) {
+        break;
+      }
+      if (!used.has(key) && props[key] !== null && props[key] !== undefined) {
+        rows.push([key, props[key]]);
+      }
+    }
+    const body = rows.map(([key, value]) => (
+      `<tr><th>${escapeHtml(key)}</th><td>${escapeHtml(value)}</td></tr>`
+    )).join("");
+    return `<strong>${escapeHtml(config.label)}</strong><table>${body}</table>`;
+  }
+
+  async function loadLayer(config) {
+    status.textContent = `Cargando ${config.label}...`;
+    const response = await fetch(config.file, { cache: "no-cache" });
+    if (!response.ok) {
+      throw new Error(`${config.file}: HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const layer = L.geoJSON(data, {
+      style: function (feature) {
+        return styleFeature(feature, config);
+      },
+      pointToLayer: function (feature, latlng) {
+        return pointLayer(feature, latlng, config);
+      },
+      onEachFeature: function (feature, layerItem) {
+        layerItem.bindPopup(popupHtml(feature, config), { maxHeight: 320 });
+      }
+    });
+    layerState.set(config.id, layer);
+    return layer;
+  }
+
+  async function setLayer(config, checked) {
+    try {
+      let layer = layerState.get(config.id);
+      if (checked) {
+        if (!layer) {
+          layer = await loadLayer(config);
+        }
+        layer.addTo(map);
+        if (config.kind === "mask" || config.kind === "spectral") {
+          const bounds = layer.getBounds();
+          if (bounds.isValid()) {
+            map.fitBounds(bounds.pad(0.06));
+          }
+        }
+      } else if (layer) {
+        map.removeLayer(layer);
+      }
+      status.textContent = "Mapa listo. Activa capas segun necesites; las capas grandes se cargan al seleccionarlas.";
+    } catch (error) {
+      status.textContent = `No se pudo cargar ${config.label}: ${error.message}`;
+    }
+  }
+
+  for (const config of layerConfigs) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(config.checked);
+    input.addEventListener("change", function () {
+      setLayer(config, input.checked);
+    });
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(" " + config.label));
+    controls.appendChild(label);
+  }
+
+  Promise.all(layerConfigs.filter((config) => config.checked).map((config) => setLayer(config, true)))
+    .then(function () {
+      status.textContent = "Mapa listo. Activa capas segun necesites; las capas grandes se cargan al seleccionarlas.";
+    });
+})();
+</script>
+"""
+    return template.replace("__LAYER_CONFIGS__", json.dumps(layers, ensure_ascii=False))
 
 
 def _svg_map(geo_modes: pd.DataFrame, receiver_top: pd.DataFrame, mask: GeoMask) -> str:
