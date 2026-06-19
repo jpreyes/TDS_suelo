@@ -17,14 +17,17 @@ from urllib.parse import parse_qs, urlparse
 from .config import PipelineConfig
 
 
-def _tail(path: Path, max_bytes: int = 50000) -> str:
+def _tail(path: Path, max_bytes: int = 50000, *, latest_first: bool = False) -> str:
     if not path.exists():
         return ""
     with path.open("rb") as handle:
         handle.seek(0, os.SEEK_END)
         size = handle.tell()
         handle.seek(max(0, size - max_bytes))
-        return handle.read().decode("utf-8", errors="replace")
+        text = handle.read().decode("utf-8", errors="replace")
+    if not latest_first:
+        return text
+    return "\n".join(reversed([line for line in text.splitlines() if line.strip()]))
 
 
 def _html_page(title: str, body: str) -> bytes:
@@ -37,20 +40,21 @@ def _html_page(title: str, body: str) -> bytes:
 <style>
 :root {{
   color-scheme: light;
-  --ink: #17212b;
-  --muted: #607080;
-  --line: #d6dee6;
+  --ink: #202a3a;
+  --muted: #687386;
+  --line: #dce3ea;
   --panel: #ffffff;
-  --soft: #f4f7fa;
-  --brand: #205c6b;
-  --brand-strong: #174754;
-  --danger: #9f2f2f;
+  --soft: #f7f9fc;
+  --brand: #0f766e;
+  --brand-strong: #115e59;
+  --accent: #f97316;
+  --danger: #b42318;
 }}
 * {{ box-sizing: border-box; }}
 body {{
   margin: 0;
   color: var(--ink);
-  background: #eef3f6;
+  background: #f5f7fb;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }}
 a {{ color: var(--brand); text-decoration: none; }}
@@ -61,12 +65,14 @@ a:hover {{ text-decoration: underline; }}
   justify-content: space-between;
   gap: 16px;
   padding: 14px 24px;
-  background: #102832;
-  color: #ffffff;
+  background: #ffffff;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(18, 31, 49, 0.05);
 }}
-.brand {{ font-weight: 700; letter-spacing: 0; }}
+.brand {{ color: var(--brand-strong); font-weight: 750; letter-spacing: 0; }}
 .nav {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-.nav a {{ color: #dcecf0; font-size: 0.92rem; }}
+.nav a {{ color: var(--ink); font-size: 0.92rem; }}
 .shell {{ max-width: 1220px; margin: 0 auto; padding: 24px; }}
 .page-head {{
   display: grid;
@@ -84,7 +90,7 @@ h3 {{ margin: 18px 0 8px; font-size: 0.98rem; }}
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  box-shadow: 0 1px 2px rgba(16, 40, 50, 0.05);
+  box-shadow: 0 10px 28px rgba(18, 31, 49, 0.05);
 }}
 .card {{ padding: 14px; }}
 .card span {{ display: block; color: var(--muted); font-size: 0.82rem; }}
@@ -114,12 +120,12 @@ button {{
 }}
 button.secondary {{ background: #ffffff; color: var(--brand); }}
 button.danger {{ border-color: var(--danger); background: #ffffff; color: var(--danger); }}
-.status {{ display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; background: #e8f3ee; color: #1f6a46; font-weight: 650; }}
+.status {{ display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 999px; background: #e7f8f5; color: var(--brand-strong); font-weight: 650; }}
 .status.idle {{ background: #edf1f5; color: #455665; }}
 pre {{
   white-space: pre-wrap;
-  background: #101923;
-  color: #e5edf4;
+  background: #111827;
+  color: #e5e7eb;
   border-radius: 8px;
   padding: 14px;
   max-height: 460px;
@@ -267,6 +273,14 @@ def _forward_command(form: dict[str, str], defaults: PipelineConfig) -> list[str
 
 def _scenario_command(form: dict[str, str], defaults: PipelineConfig) -> list[str]:
     output_dir = form.get("output_dir") or str(defaults.output_dir)
+    source_lat = form.get("source_lat")
+    source_lon = form.get("source_lon")
+    has_direct_source = bool(source_lat and source_lon)
+    source_direction = form.get("source_direction")
+    if not source_direction and not has_direct_source:
+        source_direction = "suroeste"
+    if has_direct_source:
+        source_direction = ""
     command = [
         sys.executable,
         "-m",
@@ -283,7 +297,7 @@ def _scenario_command(form: dict[str, str], defaults: PipelineConfig) -> list[st
         "--source-distance-km",
         form.get("source_distance_km") or "100",
         "--source-direction",
-        form.get("source_direction") or "suroeste",
+        source_direction or "",
         "--mw",
         form.get("mw") or "7.5",
         "--vs30",
@@ -300,6 +314,8 @@ def _scenario_command(form: dict[str, str], defaults: PipelineConfig) -> list[st
     bearing = form.get("source_bearing_deg")
     if bearing:
         command.extend(["--source-bearing-deg", bearing])
+    if source_lat and source_lon:
+        command.extend(["--source-lat", source_lat, "--source-lon", source_lon])
     mask_geojson = form.get("mask_geojson") or (str(defaults.mask_geojson) if defaults.mask_geojson else "")
     if mask_geojson:
         command.extend(["--mask-geojson", mask_geojson])
@@ -367,7 +383,8 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
                     return
                 kind = self._query().get("kind", "run")
                 path = state.admin_log if kind == "admin" else output_dir / "run.log"
-                self._send_bytes(_tail(path).encode("utf-8"), "text/plain; charset=utf-8")
+                latest_first = self._query().get("latest_first", "1") != "0"
+                self._send_bytes(_tail(path, latest_first=latest_first).encode("utf-8"), "text/plain; charset=utf-8")
                 return
             return super().do_GET()
 
@@ -502,7 +519,7 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
 
 <section class="panel">
   <h2>Escenario forward</h2>
-  <p class="note">Estima un escenario nuevo con análogos observados. Por defecto: fuente a 100 km al suroeste de Santiago, Mw 7.5 y Vs30 600 m/s.</p>
+  <p class="note">Uso general: puedes definir receptor y fuente por coordenadas directas, o usar distancia + direccion/azimut. Si completas source-lat y source-lon, esas coordenadas reemplazan distancia/direccion.</p>
   <form method="post" action="/admin/scenario">
     <input type="hidden" name="token" value="{html.escape(token)}">
     <div class="form-grid">
@@ -528,7 +545,19 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
       </div>
       <div>
         <label>source-direction</label>
-        <input type="text" name="source_direction" value="suroeste">
+        <input type="text" name="source_direction" value="suroeste" placeholder="suroeste, norte, 128">
+      </div>
+      <div>
+        <label>source-bearing-deg</label>
+        <input type="number" step="0.1" min="0" max="360" name="source_bearing_deg" placeholder="128">
+      </div>
+      <div>
+        <label>source-lat opcional</label>
+        <input type="number" step="0.0001" name="source_lat" placeholder="-18.9">
+      </div>
+      <div>
+        <label>source-lon opcional</label>
+        <input type="number" step="0.0001" name="source_lon" placeholder="-70.4">
       </div>
       <div>
         <label>Mw</label>
@@ -620,11 +649,12 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
 
 <section class="panel">
   <h2>Logs</h2>
-  <p><a href="/api/log?kind=run&token={html.escape(token)}">run.log</a> | <a href="/api/log?kind=admin&token={html.escape(token)}">admin log</a> | <a href="/api/status?token={html.escape(token)}">status JSON</a></p>
+  <p class="note">Las lineas mas recientes se muestran arriba.</p>
+  <p><a href="/api/log?kind=run&latest_first=1&token={html.escape(token)}">run.log</a> | <a href="/api/log?kind=admin&latest_first=1&token={html.escape(token)}">admin log</a> | <a href="/api/status?token={html.escape(token)}">status JSON</a></p>
   <h3>run.log</h3>
-  <pre>{html.escape(_tail(output_dir / "run.log"))}</pre>
+  <pre>{html.escape(_tail(output_dir / "run.log", latest_first=True))}</pre>
   <h3>admin log</h3>
-  <pre>{html.escape(_tail(state.admin_log))}</pre>
+  <pre>{html.escape(_tail(state.admin_log, latest_first=True))}</pre>
 </section>
 """
             return _html_page("TSD-Suelo Admin", body)

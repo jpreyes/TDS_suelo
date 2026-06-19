@@ -144,6 +144,8 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
         source_distance_km=100.0,
         source_direction="suroeste",
         source_bearing_deg=None,
+        source_latitude_deg=None,
+        source_longitude_deg=None,
         mw=7.5,
         vs30_m_s=600.0,
         depth_km=30.0,
@@ -152,9 +154,32 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
         top_n=20,
     )
     assert scenario_manifest["rows"]["analogs"] > 0
+    assert (out / "webmap_spatial_probability.geojson").exists()
+    assert (out / "webmap_spectral_dynamic.geojson").exists()
+    assert (out / "webmap_fault_candidates.geojson").exists()
+    assert (out / "webmap_kozyrev_probability.geojson").exists()
     assert (out / "forward_scenario_result.csv").exists()
     assert (out / "forward_scenario.geojson").exists()
     assert "Escenario Forward" in (out / "results_report.html").read_text(encoding="utf-8")
+    direct_manifest = run_scenario_forward(
+        PipelineConfig(records_dir=records_dir, flatfiles_dir=flatfiles_dir, output_dir=out),
+        scenario_name="direct_source_m75",
+        receiver_latitude_deg=-33.4489,
+        receiver_longitude_deg=-70.6693,
+        source_distance_km=100.0,
+        source_direction=None,
+        source_bearing_deg=None,
+        source_latitude_deg=-34.0,
+        source_longitude_deg=-71.0,
+        mw=7.5,
+        vs30_m_s=600.0,
+        depth_km=30.0,
+        tectonic_type="scenario",
+        analog_top_n=20,
+        top_n=20,
+    )
+    assert direct_manifest["scenario"]["source_direction"] is None
+    assert direct_manifest["scenario"]["source_distance_km"] != 100.0
     assert (out / "waveform_targets_errors.csv").exists()
     assert (out / "forward_conditioning_template.json").exists()
     meta = pd.read_json(out / "waveform_targets_observed.meta.json", typ="series")

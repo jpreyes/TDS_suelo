@@ -139,6 +139,34 @@ tsd-suelo scenario \
   --top-n 80
 ```
 
+Tambien puedes usar un azimut numerico desde el receptor:
+
+```bash
+tsd-suelo scenario \
+  --output-dir outputs_precomputed \
+  --scenario-name arica_az128_m75 \
+  --receiver-lat -18.4783 \
+  --receiver-lon -70.3126 \
+  --source-distance-km 100 \
+  --source-bearing-deg 128 \
+  --mw 7.5 \
+  --vs30 600
+```
+
+O entregar coordenadas directas de fuente. En ese caso `--source-lat` y `--source-lon` reemplazan distancia/direccion y la distancia se calcula automaticamente:
+
+```bash
+tsd-suelo scenario \
+  --output-dir outputs_precomputed \
+  --scenario-name fuente_directa_m75 \
+  --receiver-lat -18.4783 \
+  --receiver-lon -70.3126 \
+  --source-lat -19.1000 \
+  --source-lon -70.8000 \
+  --mw 7.5 \
+  --vs30 600
+```
+
 El escenario escribe:
 
 ```text
@@ -281,6 +309,12 @@ forward_conditioning_template.json
 pipeline_manifest.json
 results_report.html
 results_summary.json
+webmap_layers_summary.json
+webmap_chile_mask.geojson
+webmap_spatial_probability.geojson
+webmap_spectral_dynamic.geojson
+webmap_fault_candidates.geojson
+webmap_kozyrev_probability.geojson
 top_kozyrev_anomalies.csv
 top_receiver_anomalies.csv
 top_route_anomalies.csv
@@ -440,6 +474,6 @@ tsd-suelo serve \
 
 Luego abre `https://tsd.jpreyes.cl/admin`. Desde esa pagina puedes lanzar `build`, ejecutar `forward` condicionado desde parquets existentes, hacer `git pull --ff-only`, `pip install -e .`, detener un proceso, ver logs y descargar productos. Usa esto solo con token fuerte y preferentemente detras de Cloudflare Access.
 
-Abre `https://tsd.jpreyes.cl/results_report.html`. El reporte incluye un mapa interactivo con OpenStreetMap/Leaflet, capas de Chile, dinamica espectral, fallas candidatas, grilla espacial, Kozyrev y atlas.
+Abre `https://tsd.jpreyes.cl/results_report.html`. El reporte incluye un mapa interactivo con OpenStreetMap/Leaflet. Para que el navegador no cargue GeoJSON enormes, el visor usa capas compactas `webmap_*.geojson` por nivel visible: Chile, dinamica espectral, fallas candidatas, grilla espacial y Kozyrev.
 
-Tambien puedes descargar `outputs/atlas_geologico.geojson` o `outputs/atlas_geologico.kmz` y abrirlos en QGIS/Google Earth.
+Los productos completos siguen disponibles para descargar: `outputs/atlas_geologico.geojson`, `outputs/atlas_geologico.kmz`, `spatial_probability_heatmap.geojson`, `spectral_dynamic_heatmap.geojson`, `fault_candidates.geojson` y `kozyrev_heatmap.geojson`.

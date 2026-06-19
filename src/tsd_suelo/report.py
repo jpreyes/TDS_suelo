@@ -8,8 +8,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .atlas import write_geojson
+from .faults import fault_candidate_features
 from .graph import mode_columns
 from .mask import GeoMask, load_chile_mask
+from .spatial_grid import spatial_grid_features
+from .spectral import spectral_heatmap_features
+from .ultrametric import kozyrev_heatmap_features
 from .utils import ensure_dir
 
 
@@ -66,6 +71,18 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     scenario_analog_top = scenario_analogs.head(top_n)
     scenario_fault_top = scenario_faults.head(top_n)
 
+    webmap_summary = _write_webmap_layers(
+        output_dir,
+        mask,
+        spatial_nodes,
+        spatial_edges,
+        spectral_nodes,
+        spectral_edges,
+        ultrametric_nodes,
+        ultrametric_edges,
+        faults,
+    )
+
     kozyrev_top.to_csv(output_dir / "top_kozyrev_anomalies.csv", index=False)
     receiver_top.to_csv(output_dir / "top_receiver_anomalies.csv", index=False)
     route_top.to_csv(output_dir / "top_route_anomalies.csv", index=False)
@@ -90,6 +107,7 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         "compatible_dynamics": int(compatible.shape[0]),
         "forward_profiles": int(profiles.shape[0]),
         "mask_name": mask.name,
+        "webmap_layers": webmap_summary,
         "receiver_in_chile_mask": int(geo.get("receiver_in_chile_mask", pd.Series(dtype=bool)).fillna(False).sum()),
         "route_in_chile_mask": int(geo.get("route_in_chile_mask", pd.Series(dtype=bool)).fillna(False).sum()),
     }
@@ -448,6 +466,171 @@ def _top_ultrametric_edges(edges: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return edges.sort_values("edge_probability_pct", ascending=False)[[c for c in cols if c in edges.columns]].head(top_n)
 
 
+WEBMAP_MAX_GRID_FEATURES = 9000
+WEBMAP_MAX_LINE_FEATURES = 5000
+WEBMAP_MAX_KOZYREV_NODES = 4500
+WEBMAP_MAX_KOZYREV_EDGES = 3500
+
+
+def _expanded_mask_bounds(mask: GeoMask) -> tuple[float, float, float, float]:
+    min_lon, min_lat, max_lon, max_lat = mask.bounds
+    pad_lon = (max_lon - min_lon) * 0.08
+    pad_lat = (max_lat - min_lat) * 0.04
+    return min_lon - pad_lon, min_lat - pad_lat, max_lon + pad_lon, max_lat + pad_lat
+
+
+def _simplify_ring(ring: list[tuple[float, float]], max_points: int = 420) -> list[list[float]]:
+    if not ring:
+        return []
+    step = max(1, int(np.ceil(len(ring) / max_points)))
+    simplified = [[float(lon), float(lat)] for lon, lat in ring[::step]]
+    first = simplified[0]
+    if simplified[-1] != first:
+        simplified.append(first)
+    return simplified
+
+
+def _write_webmap_mask(output_dir: Path, mask: GeoMask) -> int:
+    polygons = []
+    for ring in mask.polygons:
+        simplified = _simplify_ring(ring)
+        if len(simplified) >= 4:
+            polygons.append([simplified])
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "MultiPolygon", "coordinates": polygons},
+            "properties": {
+                "feature_type": "study_mask",
+                "name": mask.name,
+                "webmap_compact": True,
+            },
+        }
+    ]
+    write_geojson(features, output_dir / "webmap_chile_mask.geojson")
+    return len(features)
+
+
+def _probability_from_feature(feature: dict[str, Any]) -> float:
+    props = feature.get("properties", {})
+    for field in (
+        "spectral_dynamic_probability_pct",
+        "spectral_transfer_probability_pct",
+        "fault_probability_pct",
+        "anomaly_probability_pct",
+        "failure_probability_pct",
+        "edge_probability_pct",
+        "mode_probability_pct",
+        "intensity_probability_pct",
+        "support_probability_pct",
+    ):
+        value = props.get(field)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(numeric):
+            return numeric
+    return 0.0
+
+
+def _limit_web_features(features: list[dict[str, Any]], max_features: int) -> list[dict[str, Any]]:
+    if len(features) <= max_features:
+        return features
+    return sorted(features, key=_probability_from_feature, reverse=True)[:max_features]
+
+
+def _select_level_frame(frame: pd.DataFrame, level: int | None) -> pd.DataFrame:
+    if frame.empty or level is None or "level" not in frame.columns:
+        return pd.DataFrame()
+    return frame[pd.to_numeric(frame["level"], errors="coerce") == level].copy()
+
+
+def _sort_head(frame: pd.DataFrame, sort_cols: tuple[str, ...], max_rows: int) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    for column in sort_cols:
+        if column in frame.columns:
+            return frame.sort_values(column, ascending=False).head(max_rows).copy()
+    return frame.head(max_rows).copy()
+
+
+def _write_webmap_layers(
+    output_dir: Path,
+    mask: GeoMask,
+    spatial_nodes: pd.DataFrame,
+    spatial_edges: pd.DataFrame,
+    spectral_nodes: pd.DataFrame,
+    spectral_edges: pd.DataFrame,
+    ultrametric_nodes: pd.DataFrame,
+    ultrametric_edges: pd.DataFrame,
+    faults: pd.DataFrame,
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {"webmap_chile_mask.geojson": _write_webmap_mask(output_dir, mask)}
+    bounds = _expanded_mask_bounds(mask)
+
+    spatial_level = _visible_grid_display_level(spatial_nodes, spatial_edges, bounds, (1280, 760), min_cell_px=4.5)
+    spatial_features: list[dict[str, Any]] = []
+    if spatial_level is not None:
+        spatial_features = spatial_grid_features(
+            _select_level_frame(spatial_nodes, spatial_level),
+            _select_level_frame(spatial_edges, spatial_level),
+            level=spatial_level,
+        )
+    spatial_features = _limit_web_features(spatial_features, WEBMAP_MAX_GRID_FEATURES)
+    write_geojson(spatial_features, output_dir / "webmap_spatial_probability.geojson")
+    summary["webmap_spatial_probability.geojson"] = {
+        "features": len(spatial_features),
+        "display_level": spatial_level,
+    }
+
+    spectral_level = _visible_grid_display_level(spectral_nodes, spectral_edges, bounds, (1280, 760), min_cell_px=4.5)
+    spectral_features: list[dict[str, Any]] = []
+    if spectral_level is not None:
+        spectral_features = spectral_heatmap_features(
+            _select_level_frame(spectral_nodes, spectral_level),
+            _select_level_frame(spectral_edges, spectral_level),
+            level=spectral_level,
+        )
+    spectral_features = _limit_web_features(spectral_features, WEBMAP_MAX_GRID_FEATURES)
+    write_geojson(spectral_features, output_dir / "webmap_spectral_dynamic.geojson")
+    summary["webmap_spectral_dynamic.geojson"] = {
+        "features": len(spectral_features),
+        "display_level": spectral_level,
+    }
+
+    fault_layer = _sort_head(faults, ("fault_probability_pct", "fault_candidate_score"), WEBMAP_MAX_LINE_FEATURES)
+    fault_features = fault_candidate_features(fault_layer)
+    write_geojson(fault_features, output_dir / "webmap_fault_candidates.geojson")
+    summary["webmap_fault_candidates.geojson"] = len(fault_features)
+
+    kozyrev_features: list[dict[str, Any]] = []
+    if not ultrametric_nodes.empty and "level" in ultrametric_nodes.columns:
+        levels = pd.to_numeric(ultrametric_nodes["level"], errors="coerce").dropna()
+        max_level = int(levels.max()) if not levels.empty else None
+        node_layer = _select_level_frame(ultrametric_nodes, max_level)
+        route_nodes = node_layer[node_layer.get("node_type", pd.Series("", index=node_layer.index)).astype(str).eq("route")]
+        point_nodes = node_layer[~node_layer.index.isin(route_nodes.index)]
+        node_layer = pd.concat(
+            [
+                _sort_head(route_nodes, ("failure_probability_pct", "delta_probability_pct"), WEBMAP_MAX_KOZYREV_NODES),
+                _sort_head(point_nodes, ("failure_probability_pct", "delta_probability_pct"), WEBMAP_MAX_KOZYREV_NODES // 2),
+            ],
+            ignore_index=True,
+        )
+        edge_layer = ultrametric_edges.copy()
+        if not edge_layer.empty and "to_level" in edge_layer.columns and max_level is not None:
+            edge_layer = edge_layer[pd.to_numeric(edge_layer["to_level"], errors="coerce") == max_level].copy()
+        edge_layer = _sort_head(edge_layer, ("edge_probability_pct",), WEBMAP_MAX_KOZYREV_EDGES)
+        kozyrev_features = kozyrev_heatmap_features(node_layer, edge_layer)
+    kozyrev_features = _limit_web_features(kozyrev_features, WEBMAP_MAX_GRID_FEATURES)
+    write_geojson(kozyrev_features, output_dir / "webmap_kozyrev_probability.geojson")
+    summary["webmap_kozyrev_probability.geojson"] = len(kozyrev_features)
+
+    (output_dir / "webmap_layers_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return summary
+
+
 def _render_html(
     output_dir: Path,
     summary: dict[str, Any],
@@ -487,19 +670,20 @@ def _render_html(
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root {{
-  --ink: #17212b;
-  --muted: #617180;
-  --line: #d7e0e7;
+  --ink: #202a3a;
+  --muted: #687386;
+  --line: #dce3ea;
   --panel: #ffffff;
-  --soft: #f4f7fa;
-  --brand: #205c6b;
-  --brand-strong: #163f4b;
+  --soft: #f7f9fc;
+  --brand: #0f766e;
+  --brand-strong: #115e59;
+  --accent: #f97316;
 }}
 * {{ box-sizing: border-box; }}
 body {{
   margin: 0;
   color: var(--ink);
-  background: #eef3f6;
+  background: #f5f7fb;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }}
 a {{ color: var(--brand); text-decoration: none; }}
@@ -511,29 +695,31 @@ a:hover {{ text-decoration: underline; }}
   gap: 24px;
   align-items: end;
   padding: 26px;
-  color: #ffffff;
-  background: #102832;
-  border-bottom: 4px solid #2f7d8c;
+  color: var(--ink);
+  background: #ffffff;
+  border-bottom: 1px solid var(--line);
+  border-top: 5px solid var(--brand);
+  box-shadow: 0 10px 28px rgba(18, 31, 49, 0.06);
 }}
-.eyebrow {{ margin: 0 0 8px; color: #a8d6df; font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0; }}
-h1 {{ margin: 0; font-size: clamp(1.75rem, 2.4vw, 2.45rem); }}
-.hero .note {{ color: #d4e8ed; max-width: 860px; }}
+.eyebrow {{ margin: 0 0 8px; color: var(--brand-strong); font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0; }}
+h1 {{ margin: 0; font-size: 2.15rem; }}
+.hero .note {{ color: var(--muted); max-width: 860px; }}
 .hero-actions {{ display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }}
-.button-link {{ display: inline-flex; align-items: center; min-height: 36px; padding: 8px 11px; border: 1px solid #7bb8c4; border-radius: 6px; color: #ffffff; background: rgba(255,255,255,0.08); font-weight: 650; }}
-.button-link:hover {{ text-decoration: none; background: rgba(255,255,255,0.14); }}
+.button-link {{ display: inline-flex; align-items: center; min-height: 36px; padding: 8px 11px; border: 1px solid var(--brand); border-radius: 6px; color: #ffffff; background: var(--brand); font-weight: 650; }}
+.button-link:hover {{ text-decoration: none; background: var(--brand-strong); }}
 .subnav {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }}
 .subnav a {{ padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; background: #ffffff; color: var(--brand-strong); font-size: 0.9rem; }}
 h2 {{ margin: 0; font-size: 1.2rem; }}
 .section-head {{ display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 12px; }}
-.panel {{ margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 1px 2px rgba(16,40,50,0.05); }}
+.panel {{ margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 10px 28px rgba(18,31,49,0.05); }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; margin: 18px 0; }}
-.metric {{ border: 1px solid var(--line); border-radius: 8px; padding: 13px; background: var(--panel); box-shadow: 0 1px 2px rgba(16,40,50,0.04); }}
+.metric {{ border: 1px solid var(--line); border-radius: 8px; padding: 13px; background: var(--panel); box-shadow: 0 6px 18px rgba(18,31,49,0.04); }}
 .metric span {{ display: block; color: var(--muted); font-size: 0.82rem; }}
 .metric strong {{ display: block; margin-top: 6px; font-size: 1.42rem; }}
 .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; }}
 table {{ border-collapse: collapse; width: 100%; margin: 0; font-size: 0.84rem; }}
 th, td {{ border-bottom: 1px solid #e3e9ee; padding: 7px 9px; text-align: left; vertical-align: top; }}
-th {{ position: sticky; top: 0; background: #edf3f6; color: #263845; z-index: 1; }}
+th {{ position: sticky; top: 0; background: #eef5f4; color: #263845; z-index: 1; }}
 tr:nth-child(even) td {{ background: #fafcfd; }}
 svg {{ width: 100%; max-width: 100%; height: 760px; border: 1px solid var(--line); background: #f9fbfd; border-radius: 8px; }}
 .map-shell {{ max-width: 100%; margin: 14px 0 0; border: 1px solid var(--line); background: #f8fafc; border-radius: 8px; overflow: hidden; }}
@@ -545,10 +731,11 @@ svg {{ width: 100%; max-width: 100%; height: 760px; border: 1px solid var(--line
 .leaflet-popup-content th, .leaflet-popup-content td {{ padding: 3px 5px; }}
 .downloads {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }}
 .downloads a {{ display: block; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); color: var(--brand-strong); font-size: 0.88rem; }}
-.downloads a:hover {{ text-decoration: none; background: #e7eff3; }}
+.downloads a:hover {{ text-decoration: none; background: #e8f5f3; }}
 .note {{ color: #53606d; }}
 @media (max-width: 760px) {{
   .hero {{ grid-template-columns: 1fr; padding: 20px; }}
+  h1 {{ font-size: 1.75rem; }}
   .hero-actions {{ justify-content: flex-start; }}
   .report-shell {{ padding: 14px; }}
 }}
@@ -585,7 +772,7 @@ svg {{ width: 100%; max-width: 100%; height: 760px; border: 1px solid var(--line
       <h2>Mapa Interactivo Chile</h2>
       <span class="note">Leaflet + OpenStreetMap, sin API key</span>
     </div>
-    <p class="note">Carga GeoJSON locales desde esta misma carpeta. Activa o desactiva capas para inspeccionar fallas, dinamica espectral, anomalias espaciales y atlas.</p>
+    <p class="note">El visor carga capas web compactas por nivel visible para navegar rapido. Los GeoJSON completos siguen disponibles en Descargas para QGIS, Google Earth u otros analisis.</p>
     {_interactive_leaflet_map(output_dir)}
   </section>
 
@@ -722,6 +909,7 @@ def _scenario_section(
         ("Mw", scenario_input.get("mw")),
         ("Vs30 m/s", scenario_input.get("vs30_m_s")),
         ("Distancia km", scenario_input.get("source_distance_km")),
+        ("Distancia solicitada km", scenario_input.get("source_distance_km_requested")),
         ("Direccion", scenario_input.get("source_direction")),
         ("Azimut fuente", scenario_input.get("source_bearing_from_receiver_deg")),
         ("Fuente lat", scenario_input.get("source_latitude_deg")),
@@ -753,6 +941,12 @@ def _download_links(output_dir: Path) -> str:
     products = [
         ("Reporte HTML", "results_report.html"),
         ("Resumen JSON", "results_summary.json"),
+        ("Resumen capas web JSON", "webmap_layers_summary.json"),
+        ("Chile web GeoJSON", "webmap_chile_mask.geojson"),
+        ("Mapa espacial web GeoJSON", "webmap_spatial_probability.geojson"),
+        ("Mapa espectral web GeoJSON", "webmap_spectral_dynamic.geojson"),
+        ("Fallas web GeoJSON", "webmap_fault_candidates.geojson"),
+        ("Kozyrev web GeoJSON", "webmap_kozyrev_probability.geojson"),
         ("Mapa calor espacial GeoJSON", "spatial_probability_heatmap.geojson"),
         ("Mapa calor espacial KMZ", "spatial_probability_heatmap.kmz"),
         ("Celdas espaciales GeoJSON", "spatial_anomaly_nodes.geojson"),
@@ -805,21 +999,21 @@ def _interactive_leaflet_map(output_dir: Path) -> str:
         {
             "id": "mask",
             "label": "Chile",
-            "file": "chile_mask.geojson",
+            "file": "webmap_chile_mask.geojson",
             "kind": "mask",
             "checked": True,
         },
         {
             "id": "spectral",
-            "label": "Dinamica espectral",
-            "file": "spectral_dynamic_heatmap.geojson",
+            "label": "Dinamica espectral web",
+            "file": "webmap_spectral_dynamic.geojson",
             "kind": "spectral",
             "checked": True,
         },
         {
             "id": "faults",
-            "label": "Fallas candidatas",
-            "file": "fault_candidates.geojson",
+            "label": "Fallas candidatas web",
+            "file": "webmap_fault_candidates.geojson",
             "kind": "faults",
             "checked": True,
         },
@@ -832,23 +1026,16 @@ def _interactive_leaflet_map(output_dir: Path) -> str:
         },
         {
             "id": "spatial",
-            "label": "Anomalia espacial",
-            "file": "spatial_probability_heatmap.geojson",
+            "label": "Anomalia espacial web",
+            "file": "webmap_spatial_probability.geojson",
             "kind": "spatial",
             "checked": False,
         },
         {
             "id": "kozyrev",
-            "label": "Kozyrev",
-            "file": "kozyrev_heatmap.geojson",
+            "label": "Kozyrev web",
+            "file": "webmap_kozyrev_probability.geojson",
             "kind": "kozyrev",
-            "checked": False,
-        },
-        {
-            "id": "atlas",
-            "label": "Atlas geologico",
-            "file": "atlas_geologico.geojson",
-            "kind": "atlas",
             "checked": False,
         },
     ]
@@ -1060,7 +1247,7 @@ def _interactive_leaflet_map(output_dir: Path) -> str:
       } else if (layer) {
         map.removeLayer(layer);
       }
-      status.textContent = "Mapa listo. Activa capas segun necesites; las capas grandes se cargan al seleccionarlas.";
+      status.textContent = "Mapa listo. Estas son capas web compactas; los GeoJSON completos estan en Descargas.";
     } catch (error) {
       status.textContent = `No se pudo cargar ${config.label}: ${error.message}`;
     }
@@ -1081,7 +1268,7 @@ def _interactive_leaflet_map(output_dir: Path) -> str:
 
   Promise.all(layerConfigs.filter((config) => config.checked).map((config) => setLayer(config, true)))
     .then(function () {
-      status.textContent = "Mapa listo. Activa capas segun necesites; las capas grandes se cargan al seleccionarlas.";
+      status.textContent = "Mapa listo. Estas son capas web compactas; los GeoJSON completos estan en Descargas.";
     });
 })();
 </script>

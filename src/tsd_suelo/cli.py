@@ -44,8 +44,10 @@ def _base_parser() -> argparse.ArgumentParser:
             cmd.add_argument("--receiver-lat", type=float, default=-33.4489, help="Latitud del receptor/sitio.")
             cmd.add_argument("--receiver-lon", type=float, default=-70.6693, help="Longitud del receptor/sitio.")
             cmd.add_argument("--source-distance-km", type=float, default=100.0, help="Distancia epicentral fuente-receptor.")
-            cmd.add_argument("--source-direction", default="suroeste", help="Direccion de la fuente desde el receptor, por ejemplo suroeste.")
+            cmd.add_argument("--source-direction", default=None, help="Direccion de la fuente desde el receptor, por ejemplo suroeste. Si no se indica, usa suroeste salvo que se entregue fuente directa.")
             cmd.add_argument("--source-bearing-deg", type=float, default=None, help="Azimut de la fuente desde el receptor; reemplaza source-direction.")
+            cmd.add_argument("--source-lat", type=float, default=None, help="Latitud directa de la fuente; reemplaza distancia/direccion si se usa con --source-lon.")
+            cmd.add_argument("--source-lon", type=float, default=None, help="Longitud directa de la fuente; reemplaza distancia/direccion si se usa con --source-lat.")
             cmd.add_argument("--mw", type=float, default=7.5, help="Magnitud Mw del escenario.")
             cmd.add_argument("--vs30", type=float, default=600.0, help="Vs30 del sitio receptor en m/s.")
             cmd.add_argument("--depth-km", type=float, default=30.0, help="Profundidad hipocentral del escenario.")
@@ -104,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {name}: {rows}")
         return 0
     if args.command == "scenario":
+        source_direction = args.source_direction
+        if source_direction is None and not (args.source_lat is not None and args.source_lon is not None):
+            source_direction = "suroeste"
         with RunLogger(cfg.log_file or (cfg.output_dir.expanduser().resolve() / "run.log"), verbose=not cfg.quiet) as log:
             manifest = run_scenario_forward(
                 cfg,
@@ -111,8 +116,10 @@ def main(argv: list[str] | None = None) -> int:
                 receiver_latitude_deg=args.receiver_lat,
                 receiver_longitude_deg=args.receiver_lon,
                 source_distance_km=args.source_distance_km,
-                source_direction=args.source_direction,
+                source_direction=source_direction,
                 source_bearing_deg=args.source_bearing_deg,
+                source_latitude_deg=args.source_lat,
+                source_longitude_deg=args.source_lon,
                 mw=args.mw,
                 vs30_m_s=args.vs30,
                 depth_km=args.depth_km,

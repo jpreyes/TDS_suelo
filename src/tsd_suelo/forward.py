@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .atlas import write_geojson
-from .geometry import add_geometry, destination_point, haversine_km
+from .geometry import add_geometry, azimuth_deg, destination_point, haversine_km
 from .graph import mode_columns
 from .residuals import DEFAULT_TARGET_COLUMNS
 from .utils import write_json, write_parquet
@@ -465,13 +465,21 @@ def _scenario_frame(
     vs30_m_s: float,
     depth_km: float,
     tectonic_type: str,
+    source_latitude_deg: float | None = None,
+    source_longitude_deg: float | None = None,
 ) -> pd.DataFrame:
-    source_lat, source_lon = destination_point(
-        receiver_latitude_deg,
-        receiver_longitude_deg,
-        source_bearing_deg,
-        source_distance_km,
-    )
+    if source_latitude_deg is not None and source_longitude_deg is not None:
+        source_lat = float(source_latitude_deg)
+        source_lon = float(source_longitude_deg)
+        source_distance_km = haversine_km(source_lat, source_lon, receiver_latitude_deg, receiver_longitude_deg)
+        source_bearing_deg = azimuth_deg(receiver_latitude_deg, receiver_longitude_deg, source_lat, source_lon)
+    else:
+        source_lat, source_lon = destination_point(
+            receiver_latitude_deg,
+            receiver_longitude_deg,
+            source_bearing_deg,
+            source_distance_km,
+        )
     rhyp = math.sqrt(source_distance_km * source_distance_km + depth_km * depth_km)
     base = pd.DataFrame(
         [
@@ -692,6 +700,8 @@ def write_forward_scenario(
     source_distance_km: float = 100.0,
     source_direction: str | None = "suroeste",
     source_bearing_deg: float | None = None,
+    source_latitude_deg: float | None = None,
+    source_longitude_deg: float | None = None,
     mw: float = 7.5,
     vs30_m_s: float = 600.0,
     depth_km: float = 30.0,
@@ -703,11 +713,17 @@ def write_forward_scenario(
     faults_path = output_dir / "fault_candidates.parquet"
     if not compatible_path.exists():
         raise FileNotFoundError(f"Falta {compatible_path}. Ejecuta primero tsd-suelo forward o build.")
+    if (source_latitude_deg is None) != (source_longitude_deg is None):
+        raise ValueError("Para fuente directa debes entregar --source-lat y --source-lon juntos.")
     compatible = pd.read_parquet(compatible_path)
     profiles = pd.read_parquet(profiles_path) if profiles_path.exists() else pd.DataFrame()
     fault_candidates = pd.read_parquet(faults_path) if faults_path.exists() else pd.DataFrame()
 
-    bearing = direction_to_bearing(source_direction, source_bearing_deg)
+    has_direct_source = source_latitude_deg is not None and source_longitude_deg is not None
+    if has_direct_source and source_bearing_deg is None and not str(source_direction or "").strip():
+        bearing = 0.0
+    else:
+        bearing = direction_to_bearing(source_direction, source_bearing_deg)
     scenario_frame = _scenario_frame(
         scenario_name=scenario_name,
         receiver_latitude_deg=receiver_latitude_deg,
@@ -718,6 +734,8 @@ def write_forward_scenario(
         vs30_m_s=vs30_m_s,
         depth_km=depth_km,
         tectonic_type=tectonic_type,
+        source_latitude_deg=source_latitude_deg,
+        source_longitude_deg=source_longitude_deg,
     )
     scenario = scenario_frame.iloc[0]
     analogs = _scenario_analogs(scenario, compatible, top_n=analog_top_n)
@@ -771,7 +789,8 @@ def write_forward_scenario(
         "receiver_longitude_deg": receiver_longitude_deg,
         "source_latitude_deg": float(scenario.event_latitude_deg),
         "source_longitude_deg": float(scenario.event_longitude_deg),
-        "source_distance_km": source_distance_km,
+        "source_distance_km": float(scenario.repi_km_calc),
+        "source_distance_km_requested": float(source_distance_km),
         "hypocentral_distance_km": float(scenario.distance_km),
         "source_direction": source_direction,
         "source_bearing_from_receiver_deg": float(scenario.backazimuth_deg),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tsd_suelo.config import PipelineConfig
-from tsd_suelo.server import _build_command, _forward_command, _scenario_command
+from tsd_suelo.server import _build_command, _forward_command, _scenario_command, _tail
 
 
 def test_build_command_uses_configured_external_paths(tmp_path: Path) -> None:
@@ -66,3 +66,33 @@ def test_scenario_command_defaults_to_santiago_case(tmp_path: Path) -> None:
     assert command[command.index("--source-direction") + 1] == "suroeste"
     assert command[command.index("--mw") + 1] == "7.5"
     assert command[command.index("--vs30") + 1] == "600"
+
+
+def test_scenario_command_accepts_bearing_and_direct_source(tmp_path: Path) -> None:
+    cfg = PipelineConfig(
+        records_dir=tmp_path / "records",
+        flatfiles_dir=tmp_path / "flatfiles",
+        output_dir=tmp_path / "outputs_precomputed",
+    )
+    command = _scenario_command(
+        {
+            "output_dir": "outputs_precomputed",
+            "receiver_lat": "-18.4783",
+            "receiver_lon": "-70.3126",
+            "source_bearing_deg": "128",
+            "source_lat": "-19.1",
+            "source_lon": "-70.8",
+        },
+        cfg,
+    )
+    assert command[command.index("--receiver-lat") + 1] == "-18.4783"
+    assert command[command.index("--receiver-lon") + 1] == "-70.3126"
+    assert command[command.index("--source-bearing-deg") + 1] == "128"
+    assert command[command.index("--source-lat") + 1] == "-19.1"
+    assert command[command.index("--source-lon") + 1] == "-70.8"
+
+
+def test_tail_can_return_latest_lines_first(tmp_path: Path) -> None:
+    log = tmp_path / "run.log"
+    log.write_text("old\nmiddle\nnew\n", encoding="utf-8")
+    assert _tail(log, latest_first=True).splitlines() == ["new", "middle", "old"]
