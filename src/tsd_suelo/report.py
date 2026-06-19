@@ -21,6 +21,10 @@ def _read_optional_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path) if path.exists() else pd.DataFrame()
 
 
+def _read_optional_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
 def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top_n: int = 50) -> dict[str, Any]:
     ensure_dir(output_dir)
     geo = _read_optional_parquet(output_dir / "geo_targets_observed.parquet")
@@ -37,6 +41,10 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     faults = _read_optional_parquet(output_dir / "fault_candidates.parquet")
     compatible = _read_optional_parquet(output_dir / "compatible_dynamics.parquet")
     profiles = _read_optional_parquet(output_dir / "forward_conditioning_profiles.parquet")
+    scenario_result = _read_optional_parquet(output_dir / "forward_scenario_result.parquet")
+    scenario_analogs = _read_optional_csv(output_dir / "forward_scenario_analogs.csv")
+    scenario_faults = _read_optional_csv(output_dir / "forward_scenario_faults.csv")
+    scenario_input = _read_optional_json(output_dir / "forward_scenario_input.json")
     attribution = _read_optional_csv(output_dir / "target_level_attribution.csv")
     mask = load_chile_mask(mask_geojson if mask_geojson else _maybe_existing_mask(output_dir))
 
@@ -54,6 +62,9 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
     ultrametric_edge_top = _top_ultrametric_edges(ultrametric_edges, top_n)
     forward_top = _top_compatible_dynamics(compatible, top_n)
     forward_profile_top = _top_forward_profiles(profiles, top_n)
+    scenario_target_top = _top_scenario_targets(scenario_result, top_n)
+    scenario_analog_top = scenario_analogs.head(top_n)
+    scenario_fault_top = scenario_faults.head(top_n)
 
     kozyrev_top.to_csv(output_dir / "top_kozyrev_anomalies.csv", index=False)
     receiver_top.to_csv(output_dir / "top_receiver_anomalies.csv", index=False)
@@ -96,6 +107,10 @@ def build_results_report(output_dir: Path, mask_geojson: Path | None = None, top
         ultrametric_edge_top=ultrametric_edge_top,
         forward_top=forward_top,
         forward_profile_top=forward_profile_top,
+        scenario_input=scenario_input,
+        scenario_target_top=scenario_target_top,
+        scenario_analog_top=scenario_analog_top,
+        scenario_fault_top=scenario_fault_top,
         fault_top=fault_top,
         receiver_top=receiver_top,
         route_top=route_top,
@@ -351,6 +366,28 @@ def _top_forward_profiles(profiles: pd.DataFrame, top_n: int) -> pd.DataFrame:
     return profiles.sort_values(sort_col, ascending=False)[[c for c in cols if c in profiles.columns]].head(top_n)
 
 
+def _top_scenario_targets(result: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    if result.empty:
+        return pd.DataFrame()
+    cols = [
+        "scenario_name",
+        "target",
+        "forward_p16",
+        "forward_p50",
+        "forward_p84",
+        "forward_weighted_mean",
+        "n_analogs",
+        "mw",
+        "vs30_m_s",
+        "source_distance_km",
+        "source_bearing_from_receiver_deg",
+        "nearest_fault_candidate_id",
+        "nearest_fault_probability_pct",
+        "method",
+    ]
+    return result[[c for c in cols if c in result.columns]].head(top_n)
+
+
 def _top_faults(faults: pd.DataFrame, top_n: int) -> pd.DataFrame:
     if faults.empty:
         return pd.DataFrame()
@@ -424,6 +461,10 @@ def _render_html(
     ultrametric_edge_top: pd.DataFrame,
     forward_top: pd.DataFrame,
     forward_profile_top: pd.DataFrame,
+    scenario_input: dict[str, Any],
+    scenario_target_top: pd.DataFrame,
+    scenario_analog_top: pd.DataFrame,
+    scenario_fault_top: pd.DataFrame,
     fault_top: pd.DataFrame,
     receiver_top: pd.DataFrame,
     route_top: pd.DataFrame,
@@ -530,6 +571,7 @@ svg {{ width: 100%; max-width: 100%; height: 760px; border: 1px solid var(--line
   <nav class="subnav">
     <a href="#mapa">Mapa</a>
     <a href="#forward">Forward</a>
+    <a href="#escenario">Escenario</a>
     <a href="#fallas">Fallas</a>
     <a href="#espectral">Espectral</a>
     <a href="#espacial">Espacial</a>
@@ -558,6 +600,8 @@ svg {{ width: 100%; max-width: 100%; height: 760px; border: 1px solid var(--line
     <h3>Perfiles de condicionamiento</h3>
     {_table_html(forward_profile_top)}
   </section>
+
+  {_scenario_section(scenario_input, scenario_target_top, scenario_analog_top, scenario_fault_top)}
 
   <section class="panel" id="fallas">
     <div class="section-head">
@@ -665,6 +709,46 @@ def _table_html(df: pd.DataFrame) -> str:
     return f"<div class='table-wrap'>{table}</div>"
 
 
+def _scenario_section(
+    scenario_input: dict[str, Any],
+    scenario_target_top: pd.DataFrame,
+    scenario_analog_top: pd.DataFrame,
+    scenario_fault_top: pd.DataFrame,
+) -> str:
+    if not scenario_input and scenario_target_top.empty:
+        return ""
+    summary_items = [
+        ("Escenario", scenario_input.get("scenario_name")),
+        ("Mw", scenario_input.get("mw")),
+        ("Vs30 m/s", scenario_input.get("vs30_m_s")),
+        ("Distancia km", scenario_input.get("source_distance_km")),
+        ("Direccion", scenario_input.get("source_direction")),
+        ("Azimut fuente", scenario_input.get("source_bearing_from_receiver_deg")),
+        ("Fuente lat", scenario_input.get("source_latitude_deg")),
+        ("Fuente lon", scenario_input.get("source_longitude_deg")),
+        ("Analogos", scenario_input.get("n_analogs")),
+    ]
+    cards = "".join(
+        f"<div class='metric'><span>{html.escape(str(label))}</span><strong>{html.escape(str(value if value is not None else '-'))}</strong></div>"
+        for label, value in summary_items
+    )
+    return f"""
+  <section class="panel" id="escenario">
+    <div class="section-head">
+      <h2>Escenario Forward</h2>
+      <span class="note">Estimacion condicionada por analogos observados</span>
+    </div>
+    <div class="grid">{cards}</div>
+    <h3>Targets estimados</h3>
+    {_table_html(scenario_target_top)}
+    <h3>Analogos observados usados</h3>
+    {_table_html(scenario_analog_top)}
+    <h3>Fallas candidatas cercanas</h3>
+    {_table_html(scenario_fault_top)}
+  </section>
+"""
+
+
 def _download_links(output_dir: Path) -> str:
     products = [
         ("Reporte HTML", "results_report.html"),
@@ -697,6 +781,12 @@ def _download_links(output_dir: Path) -> str:
         ("Dinamica compatible parquet", "compatible_dynamics.parquet"),
         ("Perfiles forward parquet", "forward_conditioning_profiles.parquet"),
         ("Manifest forward JSON", "forward_manifest.json"),
+        ("Escenario forward JSON", "forward_scenario_input.json"),
+        ("Escenario forward CSV", "forward_scenario_result.csv"),
+        ("Escenario forward parquet", "forward_scenario_result.parquet"),
+        ("Escenario forward GeoJSON", "forward_scenario.geojson"),
+        ("Analogos escenario CSV", "forward_scenario_analogs.csv"),
+        ("Fallas escenario CSV", "forward_scenario_faults.csv"),
         ("Nodos ultrametricos parquet", "kozyrev_ultrametric_nodes.parquet"),
         ("Aristas ultrametricas parquet", "kozyrev_ultrametric_edges.parquet"),
         ("Log build", "run.log"),
@@ -731,6 +821,13 @@ def _interactive_leaflet_map(output_dir: Path) -> str:
             "label": "Fallas candidatas",
             "file": "fault_candidates.geojson",
             "kind": "faults",
+            "checked": True,
+        },
+        {
+            "id": "scenario",
+            "label": "Escenario forward",
+            "file": "forward_scenario.geojson",
+            "kind": "scenario",
             "checked": True,
         },
         {

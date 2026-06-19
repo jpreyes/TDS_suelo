@@ -122,6 +122,37 @@ results_report.html
 results_summary.json
 ```
 
+Para estimar un escenario nuevo por analogos observados, por ejemplo un sismo Mw 7.5 a 100 km al suroeste de Santiago con Vs30 600 m/s:
+
+```bash
+tsd-suelo scenario \
+  --output-dir outputs_precomputed \
+  --scenario-name santiago_sw_m75 \
+  --receiver-lat -33.4489 \
+  --receiver-lon -70.6693 \
+  --source-distance-km 100 \
+  --source-direction suroeste \
+  --mw 7.5 \
+  --vs30 600 \
+  --depth-km 30 \
+  --analog-top-n 200 \
+  --top-n 80
+```
+
+El escenario escribe:
+
+```text
+forward_scenario_input.json
+forward_scenario_result.csv
+forward_scenario_result.parquet
+forward_scenario_analogs.csv
+forward_scenario_faults.csv
+forward_scenario.geojson
+forward_scenario_manifest.json
+```
+
+La pagina `/admin` incluye el mismo formulario en la seccion `Escenario forward`.
+
 Si se corta despues de haber calculado `waveform_targets_observed.parquet`, pero antes de terminar todo, puedes retomar sin releer H5:
 
 ```bash

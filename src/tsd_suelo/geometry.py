@@ -35,6 +35,26 @@ def backazimuth_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return azimuth_deg(lat2, lon2, lat1, lon1)
 
 
+def destination_point(lat: float, lon: float, bearing_deg: float, distance_km: float) -> tuple[float, float]:
+    if not all(np.isfinite([lat, lon, bearing_deg, distance_km])):
+        return math.nan, math.nan
+    angular_distance = distance_km / EARTH_RADIUS_KM
+    bearing = math.radians(bearing_deg)
+    phi1 = math.radians(lat)
+    lambda1 = math.radians(lon)
+    sin_phi2 = (
+        math.sin(phi1) * math.cos(angular_distance)
+        + math.cos(phi1) * math.sin(angular_distance) * math.cos(bearing)
+    )
+    phi2 = math.asin(max(-1.0, min(1.0, sin_phi2)))
+    lambda2 = lambda1 + math.atan2(
+        math.sin(bearing) * math.sin(angular_distance) * math.cos(phi1),
+        math.cos(angular_distance) - math.sin(phi1) * math.sin(phi2),
+    )
+    out_lon = (math.degrees(lambda2) + 540.0) % 360.0 - 180.0
+    return finite_or_nan(math.degrees(phi2)), finite_or_nan(out_lon)
+
+
 def incidence_angle_deg(epicentral_km: float, depth_km: float) -> float:
     if not all(np.isfinite([epicentral_km, depth_km])) or epicentral_km < 0 or depth_km < 0:
         return math.nan

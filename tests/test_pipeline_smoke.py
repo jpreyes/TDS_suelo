@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from tsd_suelo.config import PipelineConfig
-from tsd_suelo.pipeline import run_build
+from tsd_suelo.pipeline import run_build, run_scenario_forward
 from tsd_suelo.utils import parse_numeric_vector
 
 
@@ -136,6 +136,25 @@ def test_pipeline_builds_observed_products(tmp_path: Path) -> None:
     assert {"dynamic_anomaly_score", "forward_support_weight", "compatible_dynamics_status"}.issubset(compatible.columns)
     profiles = pd.read_parquet(out / "forward_conditioning_profiles.parquet")
     assert {"context_type", "context_id", "n_records"}.issubset(profiles.columns)
+    scenario_manifest = run_scenario_forward(
+        PipelineConfig(records_dir=records_dir, flatfiles_dir=flatfiles_dir, output_dir=out),
+        scenario_name="santiago_sw_m75",
+        receiver_latitude_deg=-33.4489,
+        receiver_longitude_deg=-70.6693,
+        source_distance_km=100.0,
+        source_direction="suroeste",
+        source_bearing_deg=None,
+        mw=7.5,
+        vs30_m_s=600.0,
+        depth_km=30.0,
+        tectonic_type="scenario",
+        analog_top_n=20,
+        top_n=20,
+    )
+    assert scenario_manifest["rows"]["analogs"] > 0
+    assert (out / "forward_scenario_result.csv").exists()
+    assert (out / "forward_scenario.geojson").exists()
+    assert "Escenario Forward" in (out / "results_report.html").read_text(encoding="utf-8")
     assert (out / "waveform_targets_errors.csv").exists()
     assert (out / "forward_conditioning_template.json").exists()
     meta = pd.read_json(out / "waveform_targets_observed.meta.json", typ="series")

@@ -9,7 +9,7 @@ from .atlas import write_atlas_products
 from .config import PipelineConfig
 from .etl import build_geo_targets, build_inventory, build_waveform_targets
 from .faults import build_fault_candidates, fault_candidate_features, write_fault_products
-from .forward import write_forward_products
+from .forward import write_forward_products, write_forward_scenario
 from .graph import build_kozyrev_fields, build_route_graph, write_graph_products
 from .latent import discover_latent_modes, write_latent_products
 from .logging_utils import PhaseTimer, RunLogger, format_seconds
@@ -134,7 +134,8 @@ def run_forward(config: PipelineConfig, log: LogFn | None = None, top_n: int = 5
             "Corre build primero o revisa output-dir. Faltan: " + ", ".join(missing)
         )
 
-    with PhaseTimer(log, "FORWARD condicionado desde productos observados"):
+    phase_log = log or (lambda _message: None)
+    with PhaseTimer(phase_log, "FORWARD condicionado desde productos observados"):
         geo_targets = _read_parquet(required["geo_targets_observed"])
         residuals = _read_parquet(required["geo_residuals"])
         modes = _read_parquet(required["latent_modes"])
@@ -172,6 +173,50 @@ def run_forward(config: PipelineConfig, log: LogFn | None = None, top_n: int = 5
         log,
         "Forward compatible dynamics filas="
         f"{compatible_dynamics.shape[0]} profiles={forward_profiles.shape[0]}",
+    )
+    return manifest
+
+
+def run_scenario_forward(
+    config: PipelineConfig,
+    *,
+    scenario_name: str,
+    receiver_latitude_deg: float,
+    receiver_longitude_deg: float,
+    source_distance_km: float,
+    source_direction: str | None,
+    source_bearing_deg: float | None,
+    mw: float,
+    vs30_m_s: float,
+    depth_km: float,
+    tectonic_type: str,
+    analog_top_n: int,
+    log: LogFn | None = None,
+    top_n: int = 50,
+) -> dict[str, Any]:
+    cfg = config.resolved()
+    ensure_dir(cfg.output_dir)
+    phase_log = log or (lambda _message: None)
+    with PhaseTimer(phase_log, "SCENARIO forward condicionado"):
+        result, analogs, nearest_faults, manifest = write_forward_scenario(
+            cfg.output_dir,
+            scenario_name=scenario_name,
+            receiver_latitude_deg=receiver_latitude_deg,
+            receiver_longitude_deg=receiver_longitude_deg,
+            source_distance_km=source_distance_km,
+            source_direction=source_direction,
+            source_bearing_deg=source_bearing_deg,
+            mw=mw,
+            vs30_m_s=vs30_m_s,
+            depth_km=depth_km,
+            tectonic_type=tectonic_type,
+            analog_top_n=analog_top_n,
+        )
+        build_results_report(cfg.output_dir, mask_geojson=cfg.mask_geojson, top_n=top_n)
+    _log(
+        log,
+        "Scenario forward targets="
+        f"{result.shape[0]} analogs={analogs.shape[0]} faults={nearest_faults.shape[0]}",
     )
     return manifest
 

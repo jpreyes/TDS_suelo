@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import DEFAULT_FLATFILES_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_RECORDS_DIR, PipelineConfig
 from .logging_utils import RunLogger
-from .pipeline import run_build, run_forward, run_inventory, run_targets
+from .pipeline import run_build, run_forward, run_inventory, run_scenario_forward, run_targets
 from .report import build_results_report, print_summary
 
 
@@ -15,7 +15,7 @@ def _base_parser() -> argparse.ArgumentParser:
         description="Pipeline TSD-Suelo observado desde H5 y flatfiles primarios.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for name in ("inventory", "targets", "build", "forward", "report", "summary", "serve"):
+    for name in ("inventory", "targets", "build", "forward", "scenario", "report", "summary", "serve"):
         cmd = subparsers.add_parser(name)
         cmd.add_argument("--records-dir", type=Path, default=DEFAULT_RECORDS_DIR)
         cmd.add_argument("--flatfiles-dir", type=Path, default=DEFAULT_FLATFILES_DIR)
@@ -39,6 +39,18 @@ def _base_parser() -> argparse.ArgumentParser:
             cmd.add_argument("--port", type=int, default=8787, help="Puerto HTTP, por defecto 8787.")
             cmd.add_argument("--repo-dir", type=Path, default=Path("."), help="Directorio del repo para git pull/install.")
             cmd.add_argument("--admin-token", default=None, help="Token para controles admin. Alternativa: TSD_SUELO_ADMIN_TOKEN.")
+        if name == "scenario":
+            cmd.add_argument("--scenario-name", default="santiago_sw_m75", help="Identificador del escenario forward.")
+            cmd.add_argument("--receiver-lat", type=float, default=-33.4489, help="Latitud del receptor/sitio.")
+            cmd.add_argument("--receiver-lon", type=float, default=-70.6693, help="Longitud del receptor/sitio.")
+            cmd.add_argument("--source-distance-km", type=float, default=100.0, help="Distancia epicentral fuente-receptor.")
+            cmd.add_argument("--source-direction", default="suroeste", help="Direccion de la fuente desde el receptor, por ejemplo suroeste.")
+            cmd.add_argument("--source-bearing-deg", type=float, default=None, help="Azimut de la fuente desde el receptor; reemplaza source-direction.")
+            cmd.add_argument("--mw", type=float, default=7.5, help="Magnitud Mw del escenario.")
+            cmd.add_argument("--vs30", type=float, default=600.0, help="Vs30 del sitio receptor en m/s.")
+            cmd.add_argument("--depth-km", type=float, default=30.0, help="Profundidad hipocentral del escenario.")
+            cmd.add_argument("--tectonic-type", default="scenario", help="Tipo tectonico descriptivo.")
+            cmd.add_argument("--analog-top-n", type=int, default=200, help="Cantidad maxima de analogos observados.")
     return parser
 
 
@@ -88,6 +100,28 @@ def main(argv: list[str] | None = None) -> int:
         with RunLogger(cfg.log_file or (cfg.output_dir.expanduser().resolve() / "run.log"), verbose=not cfg.quiet) as log:
             manifest = run_forward(cfg, log=log, top_n=args.top_n)
         print(f"Forward escrito en {manifest['output_dir']}")
+        for name, rows in manifest["rows"].items():
+            print(f"  {name}: {rows}")
+        return 0
+    if args.command == "scenario":
+        with RunLogger(cfg.log_file or (cfg.output_dir.expanduser().resolve() / "run.log"), verbose=not cfg.quiet) as log:
+            manifest = run_scenario_forward(
+                cfg,
+                scenario_name=args.scenario_name,
+                receiver_latitude_deg=args.receiver_lat,
+                receiver_longitude_deg=args.receiver_lon,
+                source_distance_km=args.source_distance_km,
+                source_direction=args.source_direction,
+                source_bearing_deg=args.source_bearing_deg,
+                mw=args.mw,
+                vs30_m_s=args.vs30,
+                depth_km=args.depth_km,
+                tectonic_type=args.tectonic_type,
+                analog_top_n=args.analog_top_n,
+                log=log,
+                top_n=args.top_n,
+            )
+        print(f"Scenario forward escrito en {cfg.output_dir.expanduser().resolve()}")
         for name, rows in manifest["rows"].items():
             print(f"  {name}: {rows}")
         return 0

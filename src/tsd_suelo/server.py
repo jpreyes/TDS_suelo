@@ -265,6 +265,47 @@ def _forward_command(form: dict[str, str], defaults: PipelineConfig) -> list[str
     return command
 
 
+def _scenario_command(form: dict[str, str], defaults: PipelineConfig) -> list[str]:
+    output_dir = form.get("output_dir") or str(defaults.output_dir)
+    command = [
+        sys.executable,
+        "-m",
+        "tsd_suelo.cli",
+        "scenario",
+        "--output-dir",
+        output_dir,
+        "--scenario-name",
+        form.get("scenario_name") or "santiago_sw_m75",
+        "--receiver-lat",
+        form.get("receiver_lat") or "-33.4489",
+        "--receiver-lon",
+        form.get("receiver_lon") or "-70.6693",
+        "--source-distance-km",
+        form.get("source_distance_km") or "100",
+        "--source-direction",
+        form.get("source_direction") or "suroeste",
+        "--mw",
+        form.get("mw") or "7.5",
+        "--vs30",
+        form.get("vs30") or "600",
+        "--depth-km",
+        form.get("depth_km") or "30",
+        "--tectonic-type",
+        form.get("tectonic_type") or "scenario",
+        "--analog-top-n",
+        form.get("analog_top_n") or "200",
+        "--top-n",
+        form.get("top_n") or "80",
+    ]
+    bearing = form.get("source_bearing_deg")
+    if bearing:
+        command.extend(["--source-bearing-deg", bearing])
+    mask_geojson = form.get("mask_geojson") or (str(defaults.mask_geojson) if defaults.mask_geojson else "")
+    if mask_geojson:
+        command.extend(["--mask-geojson", mask_geojson])
+    return command
+
+
 def _handler_factory(config: ServeConfig, state: ProcessState):
     output_dir = config.pipeline.output_dir
 
@@ -342,6 +383,10 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
                 return
             if parsed.path == "/admin/forward":
                 ok, message = state.start("tsd-suelo forward", _forward_command(form, config.pipeline), config.repo_dir)
+                self._redirect_admin(form.get("token"))
+                return
+            if parsed.path == "/admin/scenario":
+                ok, message = state.start("tsd-suelo scenario", _scenario_command(form, config.pipeline), config.repo_dir)
                 self._redirect_admin(form.get("token"))
                 return
             if parsed.path == "/admin/git-pull":
@@ -451,6 +496,61 @@ def _handler_factory(config: ServeConfig, state: ProcessState):
       <button type="submit">Ejecutar forward</button>
       <a href="/forward_conditioning_template.json">Contrato forward</a>
       <a href="/forward_conditioning_profiles.parquet">Perfiles parquet</a>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Escenario forward</h2>
+  <p class="note">Estima un escenario nuevo con análogos observados. Por defecto: fuente a 100 km al suroeste de Santiago, Mw 7.5 y Vs30 600 m/s.</p>
+  <form method="post" action="/admin/scenario">
+    <input type="hidden" name="token" value="{html.escape(token)}">
+    <div class="form-grid">
+      <div>
+        <label>scenario-name</label>
+        <input type="text" name="scenario_name" value="santiago_sw_m75">
+      </div>
+      <div>
+        <label>output-dir</label>
+        <input type="text" name="output_dir" value="{html.escape(str(defaults.output_dir))}">
+      </div>
+      <div>
+        <label>receiver-lat</label>
+        <input type="number" step="0.0001" name="receiver_lat" value="-33.4489">
+      </div>
+      <div>
+        <label>receiver-lon</label>
+        <input type="number" step="0.0001" name="receiver_lon" value="-70.6693">
+      </div>
+      <div>
+        <label>source-distance-km</label>
+        <input type="number" step="0.1" min="0" name="source_distance_km" value="100">
+      </div>
+      <div>
+        <label>source-direction</label>
+        <input type="text" name="source_direction" value="suroeste">
+      </div>
+      <div>
+        <label>Mw</label>
+        <input type="number" step="0.1" name="mw" value="7.5">
+      </div>
+      <div>
+        <label>Vs30 m/s</label>
+        <input type="number" step="1" min="80" name="vs30" value="600">
+      </div>
+      <div>
+        <label>depth-km</label>
+        <input type="number" step="1" min="0" name="depth_km" value="30">
+      </div>
+      <div>
+        <label>analog-top-n</label>
+        <input type="number" step="1" min="10" name="analog_top_n" value="200">
+      </div>
+    </div>
+    <div class="actions">
+      <button type="submit">Ejecutar escenario</button>
+      <a href="/forward_scenario_result.csv">Resultado CSV</a>
+      <a href="/forward_scenario.geojson">Escenario GeoJSON</a>
     </div>
   </form>
 </section>
